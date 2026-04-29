@@ -1,46 +1,49 @@
 import streamlit as st
 import sqlite3
+import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
 conn = sqlite3.connect('liga_futbol.db', check_same_thread=False)
 c = conn.cursor()
 
-c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
-             (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL)''')
-
-# Intentamos agregar la columna club si no existe
-try:
-    c.execute("ALTER TABLE jugadores ADD COLUMN club TEXT")
-except:
-    pass
-
-try:
-    c.execute("ALTER TABLE jugadores ADD COLUMN valor_anterior REAL")
-except:
-    pass
-
+c.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL)')
 c.execute('''CREATE TABLE IF NOT EXISTS jugadores 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, 
               valor REAL, valor_anterior REAL, posicion TEXT, club TEXT,
               FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
 conn.commit()
 
-# --- 2. LÓGICA DE NEGOCIO ---
+# --- 2. CONEXIÓN CON TU GOOGLE SHEETS (CSV) ---
+SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
+
+@st.cache_data(ttl=300)
+def cargar_mercado_oficial(url):
+    try:
+        df = pd.read_csv(url)
+        df.columns = df.columns.str.strip()
+        return df
+    except Exception as e:
+        st.error(f"Error al cargar el Excel: {e}")
+        return None
+
+df_mercado = cargar_mercado_oficial(SHEET_CSV_URL)
+
+# --- 3. LÓGICA DE NEGOCIO ---
 MONTO_MULTA = 200000 
 
 def calcular_nuevo_valor(valor_actual, puntaje):
-    diferencia_pasos = (puntaje - 6.4) / 0.1
-    variacion = diferencia_pasos * (valor_actual / 100)
+    diff_pasos = (puntaje - 6.4) / 0.1
+    variacion = diff_pasos * (valor_actual / 100)
     return int(max(0, valor_actual + variacion))
 
-# --- 3. INTERFAZ ---
-st.set_page_config(page_title="Football Market Manager", layout="wide")
-st.title("⚽ Football Market Manager")
+# --- 4. INTERFAZ DE USUARIO ---
+st.set_page_config(page_title="Liga Argentina Manager", layout="wide")
+st.title("⚽ Liga Argentina Manager")
 
-user_name = st.sidebar.text_input("Ingresa tu nombre de Usuario").strip()
+user_name = st.sidebar.text_input("Usuario").strip()
 
 if not user_name:
-    st.info("👋 Ingresa tu nombre en la barra lateral para comenzar.")
+    st.info("👋 Ingresa tu nombre en la barra lateral para gestionar tu equipo.")
     st.stop()
 
 PRESUPUESTO_INICIAL = 11000000
@@ -48,123 +51,118 @@ c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", 
 conn.commit()
 
 c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
-user_data = c.fetchone()
-user_id, presupuesto = user_data
+user_id, presupuesto = c.fetchone()
 
-# --- SIDEBAR: ESTADO Y SEGURIDAD ---
+# Sidebar: Estado
 st.sidebar.success(f"Club: {user_name}")
-st.sidebar.metric("Presupuesto Actual", f"€{int(presupuesto):,}")
+st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
 st.sidebar.divider()
-# Cambio solicitado: Frase "Borrar Equipo"
 with st.sidebar.expander("⚠️ Borrar Equipo"):
-    st.write("Esta acción eliminará todos tus jugadores y reseteará tu dinero.")
-    confirmar_reset = st.checkbox("Confirmar eliminación total")
-    if st.button("🚨 Ejecutar Borrado", disabled=not confirmar_reset):
-        c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
-        c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
-        conn.commit()
-        st.rerun()
-
-# --- 4. GESTIÓN DE FICHAJES ---
-LISTA_CLUBES = [
-    "Aldosivi", "Argentinos Juniors", "Atlético Tucumán", "Banfield", "Barracas Central", 
-    "Belgrano", "Boca Juniors", "Central Córdoba", "Defensa y Justicia", "Deportivo Riestra", 
-    "Estudiantes LP", "Estudiantes RC", "Gimnasia LP", "Gimnasia de Mendoza", "Huracán", 
-    "Independiente", "Independiente Rivadavia", "Instituto", "Lanús", "Newell's", 
-    "Platense", "Racing Club", "River Plate", "Rosario Central", "San Lorenzo", 
-    "Sarmiento", "Talleres", "Tigre", "Unión", "Vélez Sarsfield"
-]
-
-POSICIONES_PERMITIDAS = {
-    "Arquero": 1,
-    "Defensor Lateral": 2,
-    "Defensor Central": 2,
-    "Mediocampista Central": 2,
-    "Mediocampista Ofensivo": 2,
-    "Delantero": 2
-}
-
-with st.expander("➕ Fichar Nuevo Jugador"):
-    col1, col2 = st.columns(2)
-    nuevo_nombre = col1.text_input("Nombre del Jugador")
-    nuevo_club = col2.selectbox("Club Real", LISTA_CLUBES)
-    
-    col3, col4 = st.columns(2)
-    nuevo_valor = col3.number_input("Precio (€)", min_value=0, step=100000)
-    nueva_pos = col4.selectbox("Posición Táctica", list(POSICIONES_PERMITIDAS.keys()))
-    
-    if st.button("Confirmar Compra"):
-        c.execute("SELECT posicion FROM jugadores WHERE usuario_id = ?", (user_id,))
-        plantilla = [row[0] for row in c.fetchall()]
-        if presupuesto < nuevo_valor:
-            st.error("Fondos insuficientes.")
-        elif len(plantilla) >= 11:
-            st.error("Plantilla de 11 completa.")
-        elif plantilla.count(nueva_pos) >= POSICIONES_PERMITIDAS[nueva_pos]:
-            st.error(f"Cupo de {nueva_pos} lleno.")
-        else:
-            val_int = int(nuevo_valor)
-            c.execute("""INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion, club) 
-                         VALUES (?,?,?,?,?,?)""",
-                      (user_id, nuevo_nombre, val_int, val_int, nueva_pos, nuevo_club))
-            c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - nuevo_valor, user_id))
+    if st.checkbox("Confirmar borrado total"):
+        if st.button("🚨 Ejecutar"):
+            c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
+            c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
             conn.commit()
             st.rerun()
 
-# --- 5. LISTA DE JUGADORES ---
+# --- 5. MERCADO DE PASES (CON SIGLAS ARQ, DEF, VOL, DEL) ---
+st.subheader("🛒 Mercado de Pases")
+
+if df_mercado is not None:
+    try:
+        # Definimos los límites según tus nuevas siglas
+        # 1 Arquero, 4 Defensores, 4 Volantes, 2 Delanteros = 11 jugadores
+        LIMITES = {
+            "ARQ": 1,
+            "DEF": 4,
+            "VOL": 4,
+            "DEL": 2
+        }
+
+        # Armamos el buscador
+        opciones = df_mercado.apply(
+            lambda x: f"{x['Nombre']} ({x['Club']}) - {x['Posicion']} - €{int(x['Precio']):,}", axis=1
+        ).tolist()
+        
+        seleccion = st.selectbox("Busca un jugador:", options=opciones)
+        
+        if st.button("Confirmar Fichaje"):
+            idx = opciones.index(seleccion)
+            j_info = df_mercado.iloc[idx]
+            
+            c.execute("SELECT posicion FROM jugadores WHERE usuario_id = ?", (user_id,))
+            actuales = [row[0] for row in c.fetchall()]
+            
+            precio_fichaje = int(j_info['Precio'])
+            posicion_sigla = str(j_info['Posicion']).strip()
+
+            if presupuesto < precio_fichaje:
+                st.error("Presupuesto insuficiente.")
+            elif len(actuales) >= 11:
+                st.error("Ya tienes 11 jugadores.")
+            elif actuales.count(posicion_sigla) >= LIMITES.get(posicion_sigla, 0):
+                st.error(f"Cupo lleno para la posición {posicion_sigla} (Límite: {LIMITES.get(posicion_sigla)}).")
+            else:
+                c.execute("""INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion, club) 
+                             VALUES (?, ?, ?, ?, ?, ?)""", 
+                          (user_id, j_info['Nombre'], precio_fichaje, precio_fichaje, posicion_sigla, j_info['Club']))
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - precio_fichaje, user_id))
+                conn.commit()
+                st.success(f"¡{j_info['Nombre']} fichado!")
+                st.rerun()
+    except Exception as e:
+        st.error(f"Error en los datos del Excel: {e}")
+
+# --- 6. TU EQUIPO ---
 st.header("📋 Tu Equipo")
 
+# Ordenar el equipo lógicamente: ARQ -> DEF -> VOL -> DEL
 query = """
     SELECT id, nombre, valor, valor_anterior, posicion, club FROM jugadores 
     WHERE usuario_id = ? 
     ORDER BY CASE posicion
-        WHEN 'Arquero' THEN 1
-        WHEN 'Defensor Lateral' THEN 2
-        WHEN 'Defensor Central' THEN 3
-        WHEN 'Mediocampista Central' THEN 4
-        WHEN 'Mediocampista Ofensivo' THEN 5
-        WHEN 'Delantero' THEN 6
+        WHEN 'ARQ' THEN 1
+        WHEN 'DEF' THEN 2
+        WHEN 'VOL' THEN 3
+        WHEN 'DEL' THEN 4
     END
 """
 c.execute(query, (user_id,))
 jugadores = c.fetchall()
-total_jugadores = len(jugadores)
 
-if total_jugadores < 11:
-    faltantes = 11 - total_jugadores
-    multa_jornada = faltantes * MONTO_MULTA
-    st.warning(f"⚠️ Equipo incompleto ({total_jugadores}/11). Multa de €{multa_jornada:,} al aplicar puntos.")
+if len(jugadores) < 11:
+    faltan = 11 - len(jugadores)
+    st.warning(f"⚠️ Equipo incompleto ({len(jugadores)}/11). Multa de €{int(faltan * MONTO_MULTA):,} al aplicar puntos.")
 
 if not jugadores:
-    st.write("Aún no tienes jugadores fichados.")
+    st.info("Usa el Mercado de Pases para armar tu equipo.")
 else:
-    for j_id, j_nombre, j_valor, j_valor_ant, j_posicion, j_club in jugadores:
+    for j_id, j_nom, j_val, j_ant, j_pos, j_club in jugadores:
         with st.container():
             col_info, col_pts, col_btns = st.columns([2, 1, 1])
-            emoji = "🧤" if "Arquero" in j_posicion else "🏃" if "Lateral" in j_posicion else "🛡️" if "Central" in j_posicion else "⚙️" if "Mediocampista Central" in j_posicion else "🪄" if "Ofensivo" in j_posicion else "⚽"
             
-            col_info.write(f"### {emoji} {j_nombre}")
-            col_info.write(f"🏠 **{j_club}** | {j_posicion}")
-            col_info.write(f"Actual: **€{int(j_valor):,}** | Anterior: €{int(j_valor_ant or j_valor):,}")
+            with col_info:
+                emoji = "🧤" if j_pos == "ARQ" else "🛡️" if j_pos == "DEF" else "⚙️" if j_pos == "VOL" else "⚽"
+                st.markdown(f"### {emoji} {j_nom}")
+                st.write(f"🏠 {j_club} | **{j_pos}**")
+                st.write(f"**€{int(j_val):,}** (Prev: €{int(j_ant or j_val):,})")
             
-            puntos = col_pts.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
+            with col_pts:
+                pts = st.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"pts_{j_id}")
             
-            if col_btns.button("✅ Aplicar", key=f"a_{j_id}", use_container_width=True):
-                v_nuevo = calcular_nuevo_valor(j_valor, puntos)
-                multa_a_descontar = (11 - total_jugadores) * MONTO_MULTA if total_jugadores < 11 else 0
-                nuevo_presupuesto = presupuesto - multa_a_descontar
+            with col_btns:
+                if st.button("✅ Aplicar", key=f"btn_a_{j_id}", use_container_width=True):
+                    v_nuevo = calcular_nuevo_valor(j_val, pts)
+                    multa = (11 - len(jugadores)) * MONTO_MULTA if len(jugadores) < 11 else 0
+                    c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_val, v_nuevo, j_id))
+                    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - multa, user_id))
+                    conn.commit()
+                    st.rerun()
                 
-                c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_valor, v_nuevo, j_id))
-                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
-                conn.commit()
-                if multa_a_descontar > 0:
-                    st.toast(f"🛑 Multa de €{multa_a_descontar:,} aplicada.", icon="💸")
-                st.rerun()
-                
-            if col_btns.button("🗑️ Vender", key=f"v_{j_id}", use_container_width=True):
-                c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
-                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_valor, user_id))
-                conn.commit()
-                st.rerun()
+                if st.button("🗑️ Vender", key=f"btn_v_{j_id}", use_container_width=True):
+                    c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
+                    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_val, user_id))
+                    conn.commit()
+                    st.rerun()
             st.divider()
