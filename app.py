@@ -1,3 +1,6 @@
+import streamlit as st
+import sqlite3
+import pandas as pd
 # --- NUEVA SECCIÓN DE GESTIÓN CON SIMULADOR ---
 st.header("📋 Tu Plantilla y Simulador")
 c.execute("SELECT id, nombre, valor, posicion FROM jugadores WHERE usuario_id = ?", (user_id,))
