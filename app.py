@@ -49,11 +49,10 @@ def cargar_mercado_oficial(url):
 
 df_mercado = cargar_mercado_oficial(SHEET_CSV_URL)
 
-# --- 3. LÓGICA DE NEGOCIO (AJUSTADA A /150) ---
+# --- 3. LÓGICA DE NEGOCIO ---
 MONTO_MULTA = 200000 
 
 def calcular_nuevo_valor(valor_actual, puntaje):
-    # Ajustado de /100 a /150 según pedido
     diff = (puntaje - 6.4) / 0.1
     var = diff * (valor_actual / 150)
     return int(max(0, valor_actual + var))
@@ -67,8 +66,8 @@ if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
-# --- PRESUPUESTO ACTUALIZADO A 25.000.000 ---
-PRESUPUESTO_INICIAL = 25000000
+# --- PRESUPUESTO ACTUALIZADO A 30.000.000 ---
+PRESUPUESTO_INICIAL = 30000000
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
 c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
@@ -105,7 +104,19 @@ with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
 st.divider()
 
 def obtener_plantilla(uid, es_titular):
-    query = f"SELECT id, nombre, valor, posicion, club, titular FROM jugadores WHERE usuario_id = ? AND titular = {es_titular} ORDER BY posicion ASC"
+    # ORDENAMIENTO PERSONALIZADO: ARQ, DEF, VOL, DEL
+    query = f"""
+        SELECT id, nombre, valor, posicion, club, titular 
+        FROM jugadores 
+        WHERE usuario_id = ? AND titular = {es_titular} 
+        ORDER BY CASE posicion
+            WHEN 'ARQ' THEN 1
+            WHEN 'DEF' THEN 2
+            WHEN 'VOL' THEN 3
+            WHEN 'DEL' THEN 4
+            ELSE 5
+        END ASC
+    """
     c.execute(query, (uid,))
     return c.fetchall()
 
@@ -114,7 +125,7 @@ suplentes = obtener_plantilla(user_id, 0)
 
 col_t, col_s = st.columns(2)
 
-# --- COLUMNA TITULARES ---
+# --- COLUMNA TITULARES (ORDENADOS) ---
 with col_t:
     st.header(f"👕 Titulares ({len(titulares)}/11)")
     if len(titulares) < 11:
@@ -122,7 +133,6 @@ with col_t:
     
     for j_id, j_nom, j_val, j_pos, j_club, _ in titulares:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})"):
-            # Muestra el valor ahora también en titulares
             st.write(f"**Valor Actual: €{int(j_val):,}**") 
             pts = st.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             c1, c2 = st.columns(2)
