@@ -8,6 +8,12 @@ c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL)''')
 
+# Intentamos agregar la columna club si no existe
+try:
+    c.execute("ALTER TABLE jugadores ADD COLUMN club TEXT")
+except:
+    pass
+
 try:
     c.execute("ALTER TABLE jugadores ADD COLUMN valor_anterior REAL")
 except:
@@ -15,7 +21,7 @@ except:
 
 c.execute('''CREATE TABLE IF NOT EXISTS jugadores 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, 
-              valor REAL, valor_anterior REAL, posicion TEXT, 
+              valor REAL, valor_anterior REAL, posicion TEXT, club TEXT,
               FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
 conn.commit()
 
@@ -50,25 +56,43 @@ st.sidebar.success(f"Club: {user_name}")
 st.sidebar.metric("Presupuesto Actual", f"€{int(presupuesto):,}")
 
 st.sidebar.divider()
-# ZONA DE PELIGRO CON CONFIRMACIÓN
+# Cambio solicitado: Frase "Borrar Equipo"
 with st.sidebar.expander("⚠️ Borrar Equipo"):
-    st.write("Esta acción es irreversible.")
-    confirmar_reset = st.checkbox("Confirmar que quiero borrar todo")
-    if st.button("🚨 Resetear Mi Club", disabled=not confirmar_reset):
+    st.write("Esta acción eliminará todos tus jugadores y reseteará tu dinero.")
+    confirmar_reset = st.checkbox("Confirmar eliminación total")
+    if st.button("🚨 Ejecutar Borrado", disabled=not confirmar_reset):
         c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
         c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
         conn.commit()
-        st.toast("El club ha sido reiniciado.", icon="♻️")
         st.rerun()
 
 # --- 4. GESTIÓN DE FICHAJES ---
-POSICIONES_PERMITIDAS = {"Arquero": 1, "Defensor": 4, "Mediocampista": 4, "Delantero": 2}
+LISTA_CLUBES = [
+    "Aldosivi", "Argentinos Juniors", "Atlético Tucumán", "Banfield", "Barracas Central", 
+    "Belgrano", "Boca Juniors", "Central Córdoba", "Defensa y Justicia", "Deportivo Riestra", 
+    "Estudiantes LP", "Estudiantes RC", "Gimnasia LP", "Gimnasia de Mendoza", "Huracán", 
+    "Independiente", "Independiente Rivadavia", "Instituto", "Lanús", "Newell's", 
+    "Platense", "Racing Club", "River Plate", "Rosario Central", "San Lorenzo", 
+    "Sarmiento", "Talleres", "Tigre", "Unión", "Vélez Sarsfield"
+]
+
+POSICIONES_PERMITIDAS = {
+    "Arquero": 1,
+    "Defensor Lateral": 2,
+    "Defensor Central": 2,
+    "Mediocampista Central": 2,
+    "Mediocampista Ofensivo": 2,
+    "Delantero": 2
+}
 
 with st.expander("➕ Fichar Nuevo Jugador"):
-    col1, col2, col3 = st.columns(3)
-    nuevo_nombre = col1.text_input("Nombre")
-    nuevo_valor = col2.number_input("Precio (€)", min_value=0, step=100000)
-    nueva_pos = col3.selectbox("Posición", list(POSICIONES_PERMITIDAS.keys()))
+    col1, col2 = st.columns(2)
+    nuevo_nombre = col1.text_input("Nombre del Jugador")
+    nuevo_club = col2.selectbox("Club Real", LISTA_CLUBES)
+    
+    col3, col4 = st.columns(2)
+    nuevo_valor = col3.number_input("Precio (€)", min_value=0, step=100000)
+    nueva_pos = col4.selectbox("Posición Táctica", list(POSICIONES_PERMITIDAS.keys()))
     
     if st.button("Confirmar Compra"):
         c.execute("SELECT posicion FROM jugadores WHERE usuario_id = ?", (user_id,))
@@ -76,13 +100,14 @@ with st.expander("➕ Fichar Nuevo Jugador"):
         if presupuesto < nuevo_valor:
             st.error("Fondos insuficientes.")
         elif len(plantilla) >= 11:
-            st.error("Plantilla llena (11/11).")
+            st.error("Plantilla de 11 completa.")
         elif plantilla.count(nueva_pos) >= POSICIONES_PERMITIDAS[nueva_pos]:
-            st.error(f"Límite de {nueva_pos} alcanzado.")
+            st.error(f"Cupo de {nueva_pos} lleno.")
         else:
             val_int = int(nuevo_valor)
-            c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion) VALUES (?,?,?,?,?)",
-                      (user_id, nuevo_nombre, val_int, val_int, nueva_pos))
+            c.execute("""INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion, club) 
+                         VALUES (?,?,?,?,?,?)""",
+                      (user_id, nuevo_nombre, val_int, val_int, nueva_pos, nuevo_club))
             c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - nuevo_valor, user_id))
             conn.commit()
             st.rerun()
@@ -90,7 +115,19 @@ with st.expander("➕ Fichar Nuevo Jugador"):
 # --- 5. LISTA DE JUGADORES ---
 st.header("📋 Tu Equipo")
 
-c.execute("SELECT id, nombre, valor, valor_anterior, posicion FROM jugadores WHERE usuario_id = ? ORDER BY CASE posicion WHEN 'Arquero' THEN 1 WHEN 'Defensor' THEN 2 WHEN 'Mediocampista' THEN 3 WHEN 'Delantero' THEN 4 END", (user_id,))
+query = """
+    SELECT id, nombre, valor, valor_anterior, posicion, club FROM jugadores 
+    WHERE usuario_id = ? 
+    ORDER BY CASE posicion
+        WHEN 'Arquero' THEN 1
+        WHEN 'Defensor Lateral' THEN 2
+        WHEN 'Defensor Central' THEN 3
+        WHEN 'Mediocampista Central' THEN 4
+        WHEN 'Mediocampista Ofensivo' THEN 5
+        WHEN 'Delantero' THEN 6
+    END
+"""
+c.execute(query, (user_id,))
 jugadores = c.fetchall()
 total_jugadores = len(jugadores)
 
@@ -102,30 +139,27 @@ if total_jugadores < 11:
 if not jugadores:
     st.write("Aún no tienes jugadores fichados.")
 else:
-    for j_id, j_nombre, j_valor, j_valor_ant, j_posicion in jugadores:
+    for j_id, j_nombre, j_valor, j_valor_ant, j_posicion, j_club in jugadores:
         with st.container():
             col_info, col_pts, col_btns = st.columns([2, 1, 1])
-            emoji = "🧤" if j_posicion == "Arquero" else "🛡️" if j_posicion == "Defensor" else "⚙️" if j_posicion == "Mediocampista" else "⚽"
+            emoji = "🧤" if "Arquero" in j_posicion else "🏃" if "Lateral" in j_posicion else "🛡️" if "Central" in j_posicion else "⚙️" if "Mediocampista Central" in j_posicion else "🪄" if "Ofensivo" in j_posicion else "⚽"
             
             col_info.write(f"### {emoji} {j_nombre}")
-            col_info.write(f"**{j_posicion}**")
-            col_info.write(f"Actual: **€{int(j_valor):,}** | Anterior: €{int(j_valor_ant):,}")
+            col_info.write(f"🏠 **{j_club}** | {j_posicion}")
+            col_info.write(f"Actual: **€{int(j_valor):,}** | Anterior: €{int(j_valor_ant or j_valor):,}")
             
             puntos = col_pts.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             
             if col_btns.button("✅ Aplicar", key=f"a_{j_id}", use_container_width=True):
                 v_nuevo = calcular_nuevo_valor(j_valor, puntos)
                 multa_a_descontar = (11 - total_jugadores) * MONTO_MULTA if total_jugadores < 11 else 0
-                
-                # Evitamos presupuesto negativo si querés (opcional, aquí lo resto directo)
                 nuevo_presupuesto = presupuesto - multa_a_descontar
                 
                 c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_valor, v_nuevo, j_id))
                 c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
                 conn.commit()
-                
                 if multa_a_descontar > 0:
-                    st.toast(f"🛑 Multa de €{multa_a_descontar:,} cobrada.", icon="💸")
+                    st.toast(f"🛑 Multa de €{multa_a_descontar:,} aplicada.", icon="💸")
                 st.rerun()
                 
             if col_btns.button("🗑️ Vender", key=f"v_{j_id}", use_container_width=True):
