@@ -10,9 +10,6 @@ c.execute('''CREATE TABLE IF NOT EXISTS usuarios
 c.execute('''CREATE TABLE IF NOT EXISTS jugadores 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, 
               valor REAL, posicion TEXT, FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
-# Tabla para el "Deshacer" (Undo)
-c.execute('''CREATE TABLE IF NOT EXISTS historial 
-             (id INTEGER PRIMARY KEY, usuario_id INTEGER, presupuesto_ant REAL, datos_jugadores_json TEXT)''')
 conn.commit()
 
 # --- 2. FUNCIONES DE LÓGICA ---
@@ -21,11 +18,6 @@ def calcular_nuevo_valor(valor_actual, puntaje):
     variacion = diferencia_pasos * (valor_actual / 100)
     return max(0, valor_actual + variacion)
 
-def guardar_estado(u_id, pres):
-    # Guardamos una foto del equipo actual antes de cambiar nada (simplificado para este ejemplo)
-    # En una app compleja usaríamos JSON, aquí permitiremos deshacer el Presupuesto y advertir cambios.
-    st.session_state['last_presupuesto'] = pres
-
 # --- 3. INTERFAZ DE USUARIO ---
 st.set_page_config(page_title="Football Market Manager", layout="wide")
 st.title("⚽ Football Market Manager")
@@ -33,7 +25,7 @@ st.title("⚽ Football Market Manager")
 user_name = st.sidebar.text_input("Ingresa tu nombre de Usuario").strip()
 
 if not user_name:
-    st.info("👋 ¡Bienvenido! Ingresa tu nombre para gestionar tu equipo.")
+    st.info("👋 ¡Bienvenido! Ingresa tu nombre en la barra lateral para empezar.")
     st.stop()
 
 PRESUPUESTO_INICIAL = 11000000.0
@@ -45,21 +37,15 @@ c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_data = c.fetchone()
 user_id, presupuesto = user_data
 
-# --- SECCIÓN DE HERRAMIENTAS (RESET Y REPARAR) ---
+# --- SIDEBAR: HERRAMIENTAS ---
 st.sidebar.divider()
-st.sidebar.subheader("⚙️ Herramientas de Control")
+st.sidebar.subheader("⚙️ Herramientas")
 
-# BOTÓN RESET
-if st.sidebar.button("🚨 Resetear Mi Club", help="Borra todos tus jugadores y vuelve el dinero a 11M"):
+if st.sidebar.button("🚨 Resetear Mi Club"):
     c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
     c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
     conn.commit()
-    st.sidebar.warning("Club reseteado con éxito.")
     st.rerun()
-
-# BOTÓN DESHACER (Simple)
-if st.sidebar.button("🔙 Deshacer Última Venta/Compra"):
-    st.sidebar.info("Esta función requiere un historial de transacciones. Por ahora, si te equivocaste, ¡usa el Reset o vende al jugador!")
 
 st.sidebar.divider()
 st.sidebar.success(f"Club: {user_name}")
@@ -70,8 +56,8 @@ POSICIONES_PERMITIDAS = {"Arquero": 1, "Defensor": 4, "Mediocampista": 4, "Delan
 
 with st.expander("➕ Fichar Nuevo Jugador"):
     col1, col2, col3 = st.columns(3)
-    nuevo_nombre = col1.text_input("Nombre del Jugador")
-    nuevo_valor = col2.number_input("Precio de Mercado (€)", min_value=0.0, step=100000.0)
+    nuevo_nombre = col1.text_input("Nombre")
+    nuevo_valor = col2.number_input("Precio (€)", min_value=0.0, step=100000.0)
     nueva_pos = col3.selectbox("Posición", list(POSICIONES_PERMITIDAS.keys()))
     
     if st.button("Confirmar Compra"):
@@ -79,25 +65,23 @@ with st.expander("➕ Fichar Nuevo Jugador"):
         plantilla = [row[0] for row in c.fetchall()]
         
         if presupuesto < nuevo_valor:
-            st.error("No tienes suficiente dinero.")
+            st.error("No tienes dinero suficiente.")
         elif len(plantilla) >= 11:
-            st.error("Plantilla de 11 completa.")
+            st.error("Plantilla completa (11/11).")
         elif plantilla.count(nueva_pos) >= POSICIONES_PERMITIDAS[nueva_pos]:
-            st.error(f"Cupo de {nueva_pos} lleno.")
+            st.error(f"Límite alcanzado para {nueva_pos}.")
         else:
             c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion) VALUES (?,?,?,?)",
                       (user_id, nuevo_nombre, nuevo_valor, nueva_pos))
             c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - nuevo_valor, user_id))
             conn.commit()
-            st.success("Fichaje exitoso.")
             st.rerun()
 
 # --- 5. LISTA DE JUGADORES ---
 st.header("📋 Tu Formación (1-4-4-2)")
 
 query = """
-    SELECT id, nombre, valor, posicion 
-    FROM jugadores 
+    SELECT id, nombre, valor, posicion FROM jugadores 
     WHERE usuario_id = ? 
     ORDER BY CASE posicion
         WHEN 'Arquero' THEN 1
@@ -118,16 +102,23 @@ else:
             emoji = "🧤" if j_posicion == "Arquero" else "🛡️" if j_posicion == "Defensor" else "⚙️" if j_posicion == "Mediocampista" else "⚽"
             
             col_info.write(f"### {emoji} {j_nombre}")
-            col_info.write(f"**{j_posicion}**")
-            col_info.write(f"Valor actual: **€{j_valor:,.2f}**")
+            col_info.write(f"**{j_posicion}** | €{j_valor:,.2f}")
             
-            p_sim = col_sim.slider(f"Puntaje para {j_nombre}", 1.0, 10.0, 6.4, step=0.1, key=f"s_{j_id}")
+            p_sim = col_sim.slider(f"Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"s_{j_id}")
             v_proy = calcular_nuevo_valor(j_valor, p_sim)
             diff = v_proy - j_valor
             
             color = "green" if diff >= 0 else "red"
-            col_sim.markdown(f"Valor Proyectado: **€{v_proy:,.2f}** (<span style='color:{color}'>{'++' if diff >= 0 else ''}{diff:,.2f}</span>)", unsafe_allow_html=True)
+            col_sim.markdown(f"Nuevo: **€{v_proy:,.2f}** (<span style='color:{color}'>{'++' if diff >= 0 else ''}{diff:,.2f}</span>)", unsafe_allow_html=True)
             
             c1, c2 = col_sim.columns(2)
-            if c1.button("✅ Aplicar Jornada", key=f"a_{j_id}"):
-                c.execute("UPDATE jugadores SET
+            if c1.button("✅ Aplicar", key=f"a_{j_id}"):
+                c.execute("UPDATE jugadores SET valor = ? WHERE id = ?", (v_proy, j_id))
+                conn.commit()
+                st.rerun()
+            if c2.button("🗑️ Vender", key=f"v_{j_id}"):
+                c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_valor, user_id))
+                conn.commit()
+                st.rerun()
+            st.divider()
