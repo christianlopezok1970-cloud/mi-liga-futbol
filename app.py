@@ -23,8 +23,7 @@ def cargar_mercado_oficial(url):
         # Limpieza inicial de espacios en los nombres de las columnas
         df.columns = df.columns.str.strip()
 
-        # AJUSTE SEGÚN TUS COLUMNAS DETECTADAS:
-        # 0: Nombre, 1: Club, 2: POS, 3: Cotización
+        # AJUSTE DE MAPEO (Corregido)
         mapeo = {
             'Nombre': ['Nombre', 'Jugador', 'NOMBRE'],
             'Club': ['Club', 'Equipo', 'CLUB'],
@@ -35,7 +34,8 @@ def cargar_mercado_oficial(url):
         for oficial, variantes in mapeo.items():
             for variante in variantes:
                 if variante in df.columns:
-                    df.rename(columns={variant: oficial}, inplace=True)
+                    # Aquí estaba el error: cambié 'variant' por 'variante'
+                    df.rename(columns={variante: oficial}, inplace=True)
                     break
         
         return df
@@ -63,7 +63,6 @@ if not user_name:
     st.info("👋 Ingresa tu nombre en la barra lateral para gestionar tu equipo.")
     st.stop()
 
-# Inicialización de usuario
 PRESUPUESTO_INICIAL = 11000000
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
@@ -71,7 +70,6 @@ conn.commit()
 c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto = c.fetchone()
 
-# Sidebar
 st.sidebar.success(f"Club: {user_name}")
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
@@ -89,12 +87,10 @@ st.subheader("🛒 Mercado de Pases")
 
 if df_mercado is not None:
     try:
-        # Cupos basados en ARQ, DEF, VOL, DEL
+        # Cupos basados en tus siglas detectadas
         LIMITES = {"ARQ": 1, "DEF": 4, "VOL": 4, "DEL": 2}
 
-        # Verificamos columnas tras el mapeo
         if 'Nombre' in df_mercado.columns and 'Precio' in df_mercado.columns:
-            # Crear lista desplegable
             opciones = df_mercado.apply(
                 lambda x: f"{x['Nombre']} ({x['Club']}) - {x['Posicion']} - €{int(x['Precio']):,}", axis=1
             ).tolist()
@@ -126,8 +122,7 @@ if df_mercado is not None:
                     st.success(f"¡{j_info['Nombre']} fichado!")
                     st.rerun()
         else:
-            st.error("Aún no se reconocen correctamente las columnas. Revisa los nombres en el Excel.")
-
+            st.error("No se reconocen las columnas necesarias.")
     except Exception as e:
         st.error(f"Error al procesar el Excel: {e}")
 
