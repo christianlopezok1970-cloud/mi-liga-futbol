@@ -9,7 +9,6 @@ c = conn.cursor()
 
 c.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL)')
 
-# Agregamos la columna 'titular' si no existe
 try:
     c.execute("ALTER TABLE jugadores ADD COLUMN titular INTEGER DEFAULT 0")
 except:
@@ -50,12 +49,13 @@ def cargar_mercado_oficial(url):
 
 df_mercado = cargar_mercado_oficial(SHEET_CSV_URL)
 
-# --- 3. LÓGICA DE NEGOCIO ---
+# --- 3. LÓGICA DE NEGOCIO (AJUSTADA A /150) ---
 MONTO_MULTA = 200000 
 
 def calcular_nuevo_valor(valor_actual, puntaje):
+    # Ajustado de /100 a /150 según pedido
     diff = (puntaje - 6.4) / 0.1
-    var = diff * (valor_actual / 100)
+    var = diff * (valor_actual / 150)
     return int(max(0, valor_actual + var))
 
 # --- 4. INTERFAZ ---
@@ -67,7 +67,8 @@ if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
-PRESUPUESTO_INICIAL = 11000000
+# --- PRESUPUESTO ACTUALIZADO A 25.000.000 ---
+PRESUPUESTO_INICIAL = 25000000
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
 c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
@@ -77,7 +78,7 @@ user_id, presupuesto = c.fetchone()
 st.sidebar.success(f"Usuario: {user_name}")
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
-# --- 5. MERCADO DE PASES (Cupo 25) ---
+# --- 5. MERCADO DE PASES ---
 with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
     if df_mercado is not None:
         opciones = df_mercado.apply(lambda x: f"{x['Nombre']} ({x['Club']}) - {x['Posicion']} - €{int(x['Precio']):,}", axis=1).tolist()
@@ -103,7 +104,6 @@ with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
 # --- 6. GESTIÓN DE EQUIPO ---
 st.divider()
 
-# Consultar jugadores
 def obtener_plantilla(uid, es_titular):
     query = f"SELECT id, nombre, valor, posicion, club, titular FROM jugadores WHERE usuario_id = ? AND titular = {es_titular} ORDER BY posicion ASC"
     c.execute(query, (uid,))
@@ -118,10 +118,12 @@ col_t, col_s = st.columns(2)
 with col_t:
     st.header(f"👕 Titulares ({len(titulares)}/11)")
     if len(titulares) < 11:
-        st.warning(f"Faltan {11 - len(titulares)} titulares. Se aplicará multa al puntuar.")
+        st.warning(f"Faltan {11 - len(titulares)} titulares. Multa de €200k x hueco.")
     
     for j_id, j_nom, j_val, j_pos, j_club, _ in titulares:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})"):
+            # Muestra el valor ahora también en titulares
+            st.write(f"**Valor Actual: €{int(j_val):,}**") 
             pts = st.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             c1, c2 = st.columns(2)
             if c1.button("✅ Aplicar", key=f"a_{j_id}"):
