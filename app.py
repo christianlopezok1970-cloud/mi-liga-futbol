@@ -19,25 +19,25 @@ c.execute('''CREATE TABLE IF NOT EXISTS jugadores
               FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
 conn.commit()
 
-# --- 2. FUNCIONES DE LÓGICA ---
+# --- 2. LÓGICA DE NEGOCIO ---
+MONTO_MULTA = 200000  # Multa de €200.000
+
 def calcular_nuevo_valor(valor_actual, puntaje):
-    # Ecuación: (Puntaje - 6.4) / 0.1 * (1% del valor)
     diferencia_pasos = (puntaje - 6.4) / 0.1
     variacion = diferencia_pasos * (valor_actual / 100)
     return int(max(0, valor_actual + variacion))
 
-# --- 3. INTERFAZ DE USUARIO ---
+# --- 3. INTERFAZ ---
 st.set_page_config(page_title="Football Market Manager", layout="wide")
 st.title("⚽ Football Market Manager")
 
 user_name = st.sidebar.text_input("Ingresa tu nombre de Usuario").strip()
 
 if not user_name:
-    st.info("👋 ¡Bienvenido! Ingresa tu nombre en la barra lateral para empezar.")
+    st.info("👋 Ingresa tu nombre en la barra lateral para comenzar.")
     st.stop()
 
 PRESUPUESTO_INICIAL = 11000000
-
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
 
@@ -45,7 +45,7 @@ c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_data = c.fetchone()
 user_id, presupuesto = user_data
 
-# --- SIDEBAR: HERRAMIENTAS ---
+# --- SIDEBAR: ESTADO ---
 st.sidebar.divider()
 if st.sidebar.button("🚨 Resetear Mi Club"):
     c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
@@ -69,13 +69,12 @@ with st.expander("➕ Fichar Nuevo Jugador"):
     if st.button("Confirmar Compra"):
         c.execute("SELECT posicion FROM jugadores WHERE usuario_id = ?", (user_id,))
         plantilla = [row[0] for row in c.fetchall()]
-        
         if presupuesto < nuevo_valor:
-            st.error("No tienes dinero suficiente.")
+            st.error("Fondos insuficientes.")
         elif len(plantilla) >= 11:
-            st.error("Plantilla completa (11/11).")
+            st.error("Plantilla llena (11/11).")
         elif plantilla.count(nueva_pos) >= POSICIONES_PERMITIDAS[nueva_pos]:
-            st.error(f"Límite alcanzado para {nueva_pos}.")
+            st.error(f"Límite de {nueva_pos} alcanzado.")
         else:
             val_int = int(nuevo_valor)
             c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion) VALUES (?,?,?,?,?)",
@@ -87,18 +86,15 @@ with st.expander("➕ Fichar Nuevo Jugador"):
 # --- 5. LISTA DE JUGADORES ---
 st.header("📋 Tu Equipo")
 
-query = """
-    SELECT id, nombre, valor, valor_anterior, posicion FROM jugadores 
-    WHERE usuario_id = ? 
-    ORDER BY CASE posicion
-        WHEN 'Arquero' THEN 1
-        WHEN 'Defensor' THEN 2
-        WHEN 'Mediocampista' THEN 3
-        WHEN 'Delantero' THEN 4
-    END
-"""
-c.execute(query, (user_id,))
+c.execute("SELECT id, nombre, valor, valor_anterior, posicion FROM jugadores WHERE usuario_id = ? ORDER BY CASE posicion WHEN 'Arquero' THEN 1 WHEN 'Defensor' THEN 2 WHEN 'Mediocampista' THEN 3 WHEN 'Delantero' THEN 4 END", (user_id,))
 jugadores = c.fetchall()
+total_jugadores = len(jugadores)
+
+# Alerta de Multa (Visual)
+if total_jugadores < 11:
+    faltantes = 11 - total_jugadores
+    multa_jornada = faltantes * MONTO_MULTA
+    st.warning(f"⚠️ Equipo incompleto ({total_jugadores}/11). Se aplicará una multa de €{multa_jornada:,} al procesar puntos.")
 
 if not jugadores:
     st.write("Aún no tienes jugadores fichados.")
@@ -108,19 +104,29 @@ else:
             col_info, col_pts, col_btns = st.columns([2, 1, 1])
             emoji = "🧤" if j_posicion == "Arquero" else "🛡️" if j_posicion == "Defensor" else "⚙️" if j_posicion == "Mediocampista" else "⚽"
             
-            # Información del jugador
             col_info.write(f"### {emoji} {j_nombre}")
             col_info.write(f"**{j_posicion}**")
             col_info.write(f"Actual: **€{int(j_valor):,}** | Anterior: €{int(j_valor_ant):,}")
             
-            # Selector de puntos con botones + / -
             puntos = col_pts.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             
-            # Botones de acción
             if col_btns.button("✅ Aplicar", key=f"a_{j_id}", use_container_width=True):
                 v_nuevo = calcular_nuevo_valor(j_valor, puntos)
+                
+                # Cálculo de multa real al presionar el botón
+                multa_a_descontar = 0
+                if total_jugadores < 11:
+                    multa_a_descontar = (11 - total_jugadores) * MONTO_MULTA
+                
+                nuevo_presupuesto = presupuesto - multa_a_descontar
+                
                 c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_valor, v_nuevo, j_id))
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
                 conn.commit()
+                
+                if multa_a_descontar > 0:
+                    st.toast(f"🛑 Multa de €{multa_a_descontar:,} cobrada.", icon="💸")
+                
                 st.rerun()
                 
             if col_btns.button("🗑️ Vender", key=f"v_{j_id}", use_container_width=True):
