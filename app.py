@@ -20,7 +20,7 @@ c.execute('''CREATE TABLE IF NOT EXISTS jugadores
 conn.commit()
 
 # --- 2. LÓGICA DE NEGOCIO ---
-MONTO_MULTA = 200000  # Multa de €200.000
+MONTO_MULTA = 200000 
 
 def calcular_nuevo_valor(valor_actual, puntaje):
     diferencia_pasos = (puntaje - 6.4) / 0.1
@@ -45,17 +45,21 @@ c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_data = c.fetchone()
 user_id, presupuesto = user_data
 
-# --- SIDEBAR: ESTADO ---
-st.sidebar.divider()
-if st.sidebar.button("🚨 Resetear Mi Club"):
-    c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
-    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
-    conn.commit()
-    st.rerun()
-
-st.sidebar.divider()
+# --- SIDEBAR: ESTADO Y SEGURIDAD ---
 st.sidebar.success(f"Club: {user_name}")
 st.sidebar.metric("Presupuesto Actual", f"€{int(presupuesto):,}")
+
+st.sidebar.divider()
+# ZONA DE PELIGRO CON CONFIRMACIÓN
+with st.sidebar.expander("⚠️ Zona de Peligro"):
+    st.write("Esta acción es irreversible.")
+    confirmar_reset = st.checkbox("Confirmar que quiero borrar todo")
+    if st.button("🚨 Resetear Mi Club", disabled=not confirmar_reset):
+        c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
+        c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
+        conn.commit()
+        st.toast("El club ha sido reiniciado.", icon="♻️")
+        st.rerun()
 
 # --- 4. GESTIÓN DE FICHAJES ---
 POSICIONES_PERMITIDAS = {"Arquero": 1, "Defensor": 4, "Mediocampista": 4, "Delantero": 2}
@@ -90,11 +94,10 @@ c.execute("SELECT id, nombre, valor, valor_anterior, posicion FROM jugadores WHE
 jugadores = c.fetchall()
 total_jugadores = len(jugadores)
 
-# Alerta de Multa (Visual)
 if total_jugadores < 11:
     faltantes = 11 - total_jugadores
     multa_jornada = faltantes * MONTO_MULTA
-    st.warning(f"⚠️ Equipo incompleto ({total_jugadores}/11). Se aplicará una multa de €{multa_jornada:,} al procesar puntos.")
+    st.warning(f"⚠️ Equipo incompleto ({total_jugadores}/11). Multa de €{multa_jornada:,} al aplicar puntos.")
 
 if not jugadores:
     st.write("Aún no tienes jugadores fichados.")
@@ -112,12 +115,9 @@ else:
             
             if col_btns.button("✅ Aplicar", key=f"a_{j_id}", use_container_width=True):
                 v_nuevo = calcular_nuevo_valor(j_valor, puntos)
+                multa_a_descontar = (11 - total_jugadores) * MONTO_MULTA if total_jugadores < 11 else 0
                 
-                # Cálculo de multa real al presionar el botón
-                multa_a_descontar = 0
-                if total_jugadores < 11:
-                    multa_a_descontar = (11 - total_jugadores) * MONTO_MULTA
-                
+                # Evitamos presupuesto negativo si querés (opcional, aquí lo resto directo)
                 nuevo_presupuesto = presupuesto - multa_a_descontar
                 
                 c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_valor, v_nuevo, j_id))
@@ -126,7 +126,6 @@ else:
                 
                 if multa_a_descontar > 0:
                     st.toast(f"🛑 Multa de €{multa_a_descontar:,} cobrada.", icon="💸")
-                
                 st.rerun()
                 
             if col_btns.button("🗑️ Vender", key=f"v_{j_id}", use_container_width=True):
