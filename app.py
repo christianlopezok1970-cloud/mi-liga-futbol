@@ -20,6 +20,7 @@ def calcular_nuevo_valor(valor_actual, puntaje):
     return max(0, valor_actual + variacion)
 
 # --- 3. INTERFAZ DE USUARIO ---
+st.set_page_config(page_title="Football Market Manager", layout="wide")
 st.title("⚽ Football Market Manager")
 
 # Login de Usuario
@@ -27,11 +28,14 @@ user_name = st.sidebar.text_input("Ingresa tu nombre de Usuario").strip()
 
 if not user_name:
     st.info("👋 ¡Bienvenido! Por favor, ingresa tu nombre en la barra lateral para empezar a gestionar tu equipo.")
-    st.stop() # Esto detiene el código aquí hasta que haya un nombre
+    st.stop()
 
-# Crear o cargar usuario (Ahora sí definimos user_id)
-c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, 50000000.0))
+# --- CAMBIO AQUÍ: Presupuesto inicial a 11.000.000 ---
+PRESUPUESTO_INICIAL = 11000000.0
+
+c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
+
 c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_data = c.fetchone()
 user_id, presupuesto = user_data
@@ -39,13 +43,18 @@ user_id, presupuesto = user_data
 st.sidebar.success(f"Conectado como: {user_name}")
 st.sidebar.metric("Presupuesto Actual", f"€{presupuesto:,.2f}")
 
-# --- 4. GESTIÓN DE FICHAJES ---
-POSICIONES_PERMITIDAS = {"Arquero": 2, "Defensor": 8, "Mediocampista": 8, "Delantero": 4}
+# --- CAMBIO AQUÍ: Nuevos topes de posición (Total 11 jugadores) ---
+POSICIONES_PERMITIDAS = {
+    "Arquero": 1,
+    "Defensor": 4,
+    "Mediocampista": 4,
+    "Delantero": 2
+}
 
 with st.expander("➕ Fichar Nuevo Jugador"):
     col1, col2, col3 = st.columns(3)
-    nuevo_nombre = col1.text_input("Nombre")
-    nuevo_valor = col2.number_input("Precio (€)", min_value=0.0, step=100000.0)
+    nuevo_nombre = col1.text_input("Nombre del Jugador")
+    nuevo_valor = col2.number_input("Precio de Mercado (€)", min_value=0.0, step=100000.0)
     nueva_pos = col3.selectbox("Posición", list(POSICIONES_PERMITIDAS.keys()))
     
     if st.button("Confirmar Compra"):
@@ -54,45 +63,33 @@ with st.expander("➕ Fichar Nuevo Jugador"):
         
         if presupuesto < nuevo_valor:
             st.error("No tienes suficiente dinero.")
-        elif len(plantilla) >= 22:
-            st.error("Plantilla completa (22/22).")
+        elif len(plantilla) >= 11:
+            st.error("Ya tienes los 11 jugadores permitidos.")
         elif plantilla.count(nueva_pos) >= POSICIONES_PERMITIDAS[nueva_pos]:
-            st.error(f"Cupo de {nueva_pos} lleno.")
+            st.error(f"Ya has alcanzado el límite de {nueva_pos}s ({POSICIONES_PERMITIDAS[nueva_pos]}).")
         else:
+            nuevo_presupuesto = presupuesto - nuevo_valor
             c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion) VALUES (?,?,?,?)",
                       (user_id, nuevo_nombre, nuevo_valor, nueva_pos))
-            c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - nuevo_valor, user_id))
+            c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
             conn.commit()
-            st.success(f"¡{nuevo_nombre} fichado!")
+            st.success(f"¡{nuevo_nombre} fichado correctamente!")
             st.rerun()
 
 # --- 5. LISTA DE JUGADORES Y SIMULADOR ---
-st.header("📋 Tu Equipo")
+st.header("📋 Tu Equipo (Titulares)")
 c.execute("SELECT id, nombre, valor, posicion FROM jugadores WHERE usuario_id = ?", (user_id,))
 jugadores = c.fetchall()
 
 if not jugadores:
-    st.write("No tienes jugadores. ¡Ve al mercado para fichar!")
+    st.write("No tienes jugadores en tu plantilla.")
 else:
-    for j_id, j_nombre, j_valor, j_posicion in jugadores:
-        with st.container():
-            col_info, col_sim = st.columns([2, 3])
-            col_info.write(f"**{j_nombre}**\n{j_posicion}\n€{j_valor:,.2f}")
-            
-            p_sim = col_sim.slider(f"Puntaje", 1.0, 10.0, 6.4, step=0.1, key=f"s_{j_id}")
-            v_proy = calcular_nuevo_valor(j_valor, p_sim)
-            diff = v_proy - j_valor
-            
-            col_sim.caption(f"Proyección: €{v_proy:,.2f} ({'+' if diff >= 0 else ''}{diff:,.2f})")
-            
-            c1, c2 = col_sim.columns(2)
-            if c1.button("✅ Aplicar", key=f"a_{j_id}"):
-                c.execute("UPDATE jugadores SET valor = ? WHERE id = ?", (v_proy, j_id))
-                conn.commit()
-                st.rerun()
-            if c2.button("🗑️ Vender", key=f"v_{j_id}"):
-                c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
-                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_valor, user_id))
-                conn.commit()
-                st.rerun()
-            st.divider()
+    # Mostrar contador de posiciones
+    c_arq = sum(1 for j in jugadores if j[3] == "Arquero")
+    c_def = sum(1 for j in jugadores if j[3] == "Defensor")
+    c_med = sum(1 for j in jugadores if j[3] == "Mediocampista")
+    c_del = sum(1 for j in jugadores if j[3] == "Delantero")
+    
+    st.write(f"📊 **Formación actual:** {c_arq} ARQ | {c_def} DEF | {c_med} MED | {c_del} DEL (Total: {len(jugadores)}/11)")
+
+    for j_id, j_nombre, j_valor
