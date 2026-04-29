@@ -104,7 +104,6 @@ with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
 st.divider()
 
 def obtener_plantilla(uid, es_titular):
-    # ORDENAMIENTO PERSONALIZADO: ARQ, DEF, VOL, DEL
     query = f"""
         SELECT id, nombre, valor, posicion, club, titular 
         FROM jugadores 
@@ -168,10 +167,14 @@ with col_s:
                 conn.commit()
                 st.rerun()
 
-# --- SIDEBAR: RESET ---
+# --- SIDEBAR: RESET CON CONFIRMACIÓN ---
 st.sidebar.divider()
-if st.sidebar.button("🚨 Borrar Equipo"):
-    c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
-    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
-    conn.commit()
-    st.rerun()
+st.sidebar.subheader("Zona de Peligro")
+with st.sidebar.expander("🚨 Reiniciar Perfil"):
+    st.write("Esto borrará a TODOS tus jugadores y reseteará tu presupuesto a €30M.")
+    confirmar_reset = st.checkbox("Estoy seguro de borrar mi equipo")
+    if st.button("BORRAR TODO", disabled=not confirmar_reset, type="primary"):
+        c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
+        c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
+        conn.commit()
+        st.rerun()
