@@ -27,10 +27,10 @@ st.title("⚽ Football Market Manager")
 user_name = st.sidebar.text_input("Ingresa tu nombre de Usuario").strip()
 
 if not user_name:
-    st.info("👋 ¡Bienvenido! Por favor, ingresa tu nombre en la barra lateral para empezar a gestionar tu equipo.")
+    st.info("👋 ¡Bienvenido! Ingresa tu nombre en la barra lateral para gestionar tu equipo.")
     st.stop()
 
-# --- CAMBIO AQUÍ: Presupuesto inicial a 11.000.000 ---
+# Presupuesto inicial corregido
 PRESUPUESTO_INICIAL = 11000000.0
 
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
@@ -40,10 +40,10 @@ c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_data = c.fetchone()
 user_id, presupuesto = user_data
 
-st.sidebar.success(f"Conectado como: {user_name}")
+st.sidebar.success(f"Club: {user_name}")
 st.sidebar.metric("Presupuesto Actual", f"€{presupuesto:,.2f}")
 
-# --- CAMBIO AQUÍ: Nuevos topes de posición (Total 11 jugadores) ---
+# --- 4. GESTIÓN DE FICHAJES (Límites 1-4-4-2) ---
 POSICIONES_PERMITIDAS = {
     "Arquero": 1,
     "Defensor": 4,
@@ -64,32 +64,46 @@ with st.expander("➕ Fichar Nuevo Jugador"):
         if presupuesto < nuevo_valor:
             st.error("No tienes suficiente dinero.")
         elif len(plantilla) >= 11:
-            st.error("Ya tienes los 11 jugadores permitidos.")
+            st.error("Plantilla de 11 completa.")
         elif plantilla.count(nueva_pos) >= POSICIONES_PERMITIDAS[nueva_pos]:
-            st.error(f"Ya has alcanzado el límite de {nueva_pos}s ({POSICIONES_PERMITIDAS[nueva_pos]}).")
+            st.error(f"Cupo de {nueva_pos} lleno ({POSICIONES_PERMITIDAS[nueva_pos]}).")
         else:
-            nuevo_presupuesto = presupuesto - nuevo_valor
+            nuevo_p = presupuesto - nuevo_valor
             c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion) VALUES (?,?,?,?)",
                       (user_id, nuevo_nombre, nuevo_valor, nueva_pos))
-            c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
+            c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_p, user_id))
             conn.commit()
-            st.success(f"¡{nuevo_nombre} fichado correctamente!")
+            st.success("Fichaje exitoso.")
             st.rerun()
 
 # --- 5. LISTA DE JUGADORES Y SIMULADOR ---
-st.header("📋 Tu Equipo (Titulares)")
+st.header("📋 Tu Equipo")
 c.execute("SELECT id, nombre, valor, posicion FROM jugadores WHERE usuario_id = ?", (user_id,))
 jugadores = c.fetchall()
 
 if not jugadores:
-    st.write("No tienes jugadores en tu plantilla.")
+    st.write("Aún no tienes jugadores fichados.")
 else:
-    # Mostrar contador de posiciones
-    c_arq = sum(1 for j in jugadores if j[3] == "Arquero")
-    c_def = sum(1 for j in jugadores if j[3] == "Defensor")
-    c_med = sum(1 for j in jugadores if j[3] == "Mediocampista")
-    c_del = sum(1 for j in jugadores if j[3] == "Delantero")
-    
-    st.write(f"📊 **Formación actual:** {c_arq} ARQ | {c_def} DEF | {c_med} MED | {c_del} DEL (Total: {len(jugadores)}/11)")
-
-    for j_id, j_nombre, j_valor
+    for j_id, j_nombre, j_valor, j_posicion in jugadores:
+        with st.container():
+            col_info, col_sim = st.columns([2, 3])
+            col_info.write(f"**{j_nombre}** | {j_posicion}\n\n€{j_valor:,.2f}")
+            
+            p_sim = col_sim.slider(f"Puntaje", 1.0, 10.0, 6.4, step=0.1, key=f"s_{j_id}")
+            v_proy = calcular_nuevo_valor(j_valor, p_sim)
+            diff = v_proy - j_valor
+            
+            color = "green" if diff >= 0 else "red"
+            col_sim.markdown(f"Valor Proyectado: **€{v_proy:,.2f}** (<span style='color:{color}'>{'++' if diff >= 0 else ''}{diff:,.2f}</span>)", unsafe_allow_html=True)
+            
+            c1, c2 = col_sim.columns(2)
+            if c1.button("✅ Aplicar", key=f"a_{j_id}"):
+                c.execute("UPDATE jugadores SET valor = ? WHERE id = ?", (v_proy, j_id))
+                conn.commit()
+                st.rerun()
+            if c2.button("🗑️ Vender", key=f"v_{j_id}"):
+                c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_valor, user_id))
+                conn.commit()
+                st.rerun()
+            st.divider()
