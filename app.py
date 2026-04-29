@@ -7,11 +7,11 @@ c = conn.cursor()
 
 c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL)''')
-# Añadimos la columna 'valor_anterior' a la tabla de jugadores
+
 try:
     c.execute("ALTER TABLE jugadores ADD COLUMN valor_anterior REAL")
 except:
-    pass # Si ya existe, no hace nada
+    pass
 
 c.execute('''CREATE TABLE IF NOT EXISTS jugadores 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, 
@@ -21,9 +21,10 @@ conn.commit()
 
 # --- 2. FUNCIONES DE LÓGICA ---
 def calcular_nuevo_valor(valor_actual, puntaje):
+    # Ecuación: (Puntaje - 6.4) / 0.1 * (1% del valor)
     diferencia_pasos = (puntaje - 6.4) / 0.1
     variacion = diferencia_pasos * (valor_actual / 100)
-    return int(max(0, valor_actual + variacion)) # Convertimos a entero (sin decimales)
+    return int(max(0, valor_actual + variacion))
 
 # --- 3. INTERFAZ DE USUARIO ---
 st.set_page_config(page_title="Football Market Manager", layout="wide")
@@ -76,15 +77,15 @@ with st.expander("➕ Fichar Nuevo Jugador"):
         elif plantilla.count(nueva_pos) >= POSICIONES_PERMITIDAS[nueva_pos]:
             st.error(f"Límite alcanzado para {nueva_pos}.")
         else:
-            # Al comprar, el valor anterior es el mismo que el inicial
+            val_int = int(nuevo_valor)
             c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion) VALUES (?,?,?,?,?)",
-                      (user_id, nuevo_nombre, int(nuevo_valor), int(nuevo_valor), nueva_pos))
+                      (user_id, nuevo_nombre, val_int, val_int, nueva_pos))
             c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - nuevo_valor, user_id))
             conn.commit()
             st.rerun()
 
 # --- 5. LISTA DE JUGADORES ---
-st.header("📋 Tu Equipo") # Cambio de título solicitado
+st.header("📋 Tu Equipo")
 
 query = """
     SELECT id, nombre, valor, valor_anterior, posicion FROM jugadores 
@@ -104,29 +105,25 @@ if not jugadores:
 else:
     for j_id, j_nombre, j_valor, j_valor_ant, j_posicion in jugadores:
         with st.container():
-            col_info, col_sim = st.columns([2, 3])
+            col_info, col_pts, col_btns = st.columns([2, 1, 1])
             emoji = "🧤" if j_posicion == "Arquero" else "🛡️" if j_posicion == "Defensor" else "⚙️" if j_posicion == "Mediocampista" else "⚽"
             
+            # Información del jugador
             col_info.write(f"### {emoji} {j_nombre}")
             col_info.write(f"**{j_posicion}**")
-            col_info.write(f"Valor Actual: **€{int(j_valor):,}**")
-            if j_valor_ant:
-                col_info.write(f"Valor Fecha Anterior: €{int(j_valor_ant):,}")
+            col_info.write(f"Actual: **€{int(j_valor):,}** | Anterior: €{int(j_valor_ant):,}")
             
-            p_sim = col_sim.slider(f"Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"s_{j_id}")
-            v_proy = calcular_nuevo_valor(j_valor, p_sim)
-            diff = v_proy - j_valor
+            # Selector de puntos con botones + / -
+            puntos = col_pts.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             
-            color = "green" if diff >= 0 else "red"
-            col_sim.markdown(f"Nuevo Proyectado: **€{int(v_proy):,}** (<span style='color:{color}'>{'++' if diff >= 0 else ''}{int(diff):,}</span>)", unsafe_allow_html=True)
-            
-            c1, c2 = col_sim.columns(2)
-            if c1.button("✅ Aplicar", key=f"a_{j_id}"):
-                # Al aplicar, el valor actual pasa a ser el anterior
-                c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_valor, v_proy, j_id))
+            # Botones de acción
+            if col_btns.button("✅ Aplicar", key=f"a_{j_id}", use_container_width=True):
+                v_nuevo = calcular_nuevo_valor(j_valor, puntos)
+                c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_valor, v_nuevo, j_id))
                 conn.commit()
                 st.rerun()
-            if c2.button("🗑️ Vender", key=f"v_{j_id}"):
+                
+            if col_btns.button("🗑️ Vender", key=f"v_{j_id}", use_container_width=True):
                 c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
                 c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_valor, user_id))
                 conn.commit()
