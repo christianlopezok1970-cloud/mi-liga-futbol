@@ -23,18 +23,19 @@ def cargar_mercado_oficial(url):
         # Limpieza inicial de espacios en los nombres de las columnas
         df.columns = df.columns.str.strip()
 
-        # SISTEMA ANTI-ERROR DE COLUMNAS: Mapeamos posibles nombres
+        # AJUSTE SEGÚN TUS COLUMNAS DETECTADAS:
+        # 0: Nombre, 1: Club, 2: POS, 3: Cotización
         mapeo = {
-            'Nombre': ['Nombre', 'Jugador', 'Jugadores', 'NOMBRE', 'nombre'],
-            'Club': ['Club', 'Equipo', 'Institucion', 'CLUB', 'club', 'Institución'],
-            'Posicion': ['Posicion', 'Posición', 'Puesto', 'POSICION', 'posicion', 'Pos'],
-            'Precio': ['Precio', 'Valor', 'Costo', 'PRECIO', 'precio', 'Monto']
+            'Nombre': ['Nombre', 'Jugador', 'NOMBRE'],
+            'Club': ['Club', 'Equipo', 'CLUB'],
+            'Posicion': ['POS', 'Posicion', 'Posición', 'Puesto'],
+            'Precio': ['Cotización', 'Cotizacion', 'Precio', 'Valor']
         }
 
         for oficial, variantes in mapeo.items():
             for variante in variantes:
                 if variante in df.columns:
-                    df.rename(columns={variante: oficial}, inplace=True)
+                    df.rename(columns={variant: oficial}, inplace=True)
                     break
         
         return df
@@ -48,7 +49,6 @@ df_mercado = cargar_mercado_oficial(SHEET_CSV_URL)
 MONTO_MULTA = 200000 
 
 def calcular_nuevo_valor(valor_actual, puntaje):
-    # Eje en 6.4: cada 0.1 de diferencia varía 1% el valor
     diff_pasos = (puntaje - 6.4) / 0.1
     variacion = diff_pasos * (valor_actual / 100)
     return int(max(0, valor_actual + variacion))
@@ -71,13 +71,12 @@ conn.commit()
 c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto = c.fetchone()
 
-# Sidebar: Estado y Borrado Seguro
+# Sidebar
 st.sidebar.success(f"Club: {user_name}")
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
 st.sidebar.divider()
 with st.sidebar.expander("⚠️ Borrar Equipo"):
-    st.write("Se eliminarán tus jugadores y volverás a €11M.")
     confirmar = st.checkbox("Confirmar eliminación total")
     if st.button("🚨 Ejecutar Borrado", disabled=not confirmar):
         c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
@@ -85,21 +84,16 @@ with st.sidebar.expander("⚠️ Borrar Equipo"):
         conn.commit()
         st.rerun()
 
-# --- 5. MERCADO DE PASES (Lógica ARQ, DEF, VOL, DEL) ---
+# --- 5. MERCADO DE PASES ---
 st.subheader("🛒 Mercado de Pases")
 
 if df_mercado is not None:
     try:
-        # Cupos basados en tus siglas
+        # Cupos basados en ARQ, DEF, VOL, DEL
         LIMITES = {"ARQ": 1, "DEF": 4, "VOL": 4, "DEL": 2}
 
-        # Verificamos si las columnas necesarias existen tras el mapeo
-        columnas_ok = all(col in df_mercado.columns for col in ['Nombre', 'Club', 'Posicion', 'Precio'])
-        
-        if not columnas_ok:
-            st.error("No se encuentran las columnas 'Nombre', 'Club', 'Posicion' o 'Precio' en tu Excel.")
-            st.write("Columnas detectadas:", df_mercado.columns.tolist())
-        else:
+        # Verificamos columnas tras el mapeo
+        if 'Nombre' in df_mercado.columns and 'Precio' in df_mercado.columns:
             # Crear lista desplegable
             opciones = df_mercado.apply(
                 lambda x: f"{x['Nombre']} ({x['Club']}) - {x['Posicion']} - €{int(x['Precio']):,}", axis=1
@@ -131,13 +125,15 @@ if df_mercado is not None:
                     conn.commit()
                     st.success(f"¡{j_info['Nombre']} fichado!")
                     st.rerun()
+        else:
+            st.error("Aún no se reconocen correctamente las columnas. Revisa los nombres en el Excel.")
+
     except Exception as e:
         st.error(f"Error al procesar el Excel: {e}")
 
 # --- 6. GESTIÓN DEL EQUIPO ---
 st.header("📋 Tu Equipo")
 
-# Orden: ARQ -> DEF -> VOL -> DEL
 query = """
     SELECT id, nombre, valor, valor_anterior, posicion, club FROM jugadores 
     WHERE usuario_id = ? 
@@ -156,37 +152,30 @@ if len(jugadores) < 11:
     st.warning(f"⚠️ Equipo incompleto ({len(jugadores)}/11). Multa de €{int(faltan * MONTO_MULTA):,} por cada 'Aplicar'.")
 
 if not jugadores:
-    st.info("No tienes jugadores. Ficha desde el Mercado de Pases.")
+    st.info("Ficha jugadores desde el Mercado de Pases.")
 else:
     for j_id, j_nom, j_val, j_ant, j_pos, j_club in jugadores:
         with st.container():
             col_info, col_pts, col_btns = st.columns([2, 1, 1])
-            
             with col_info:
                 emoji = "🧤" if j_pos == "ARQ" else "🛡️" if j_pos == "DEF" else "⚙️" if j_pos == "VOL" else "⚽"
                 st.markdown(f"### {emoji} {j_nom}")
                 st.write(f"🏠 {j_club} | **{j_pos}**")
-                st.write(f"**Valor: €{int(j_val):,}** (Prev: €{int(j_ant or j_val):,})")
+                st.write(f"**Valor: €{int(j_val):,}**")
             
-            with col_pts:
-                pts = st.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
+            pts = col_pts.number_input("Puntos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             
-            with col_btns:
-                if st.button("✅ Aplicar", key=f"a_{j_id}", use_container_width=True):
-                    v_nuevo = calcular_nuevo_valor(j_val, pts)
-                    multa = (11 - len(jugadores)) * MONTO_MULTA if len(jugadores) < 11 else 0
-                    
-                    c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_val, v_nuevo, j_id))
-                    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - multa, user_id))
-                    conn.commit()
-                    
-                    if multa > 0:
-                        st.toast(f"🛑 Multa de €{multa:,} aplicada.", icon="💸")
-                    st.rerun()
-                
-                if st.button("🗑️ Vender", key=f"v_{j_id}", use_container_width=True):
-                    c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
-                    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_val, user_id))
-                    conn.commit()
-                    st.rerun()
+            if col_btns.button("✅ Aplicar", key=f"a_{j_id}", use_container_width=True):
+                v_nuevo = calcular_nuevo_valor(j_val, pts)
+                multa = (11 - len(jugadores)) * MONTO_MULTA if len(jugadores) < 11 else 0
+                c.execute("UPDATE jugadores SET valor_anterior = ?, valor = ? WHERE id = ?", (j_val, v_nuevo, j_id))
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - multa, user_id))
+                conn.commit()
+                st.rerun()
+            
+            if col_btns.button("🗑️ Vender", key=f"v_{j_id}", use_container_width=True):
+                c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_val, user_id))
+                conn.commit()
+                st.rerun()
             st.divider()
