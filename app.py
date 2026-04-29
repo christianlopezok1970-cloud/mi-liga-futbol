@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import re
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
 conn = sqlite3.connect('liga_futbol.db', check_same_thread=False)
@@ -13,17 +14,16 @@ c.execute('''CREATE TABLE IF NOT EXISTS jugadores
               FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
 conn.commit()
 
-# --- 2. FUNCIÓN PARA CARGAR TU EXCEL (GOOGLE SHEETS CSV) ---
+# --- 2. FUNCIÓN PARA CARGAR Y LIMPIAR EL EXCEL ---
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 @st.cache_data(ttl=300)
 def cargar_mercado_oficial(url):
     try:
         df = pd.read_csv(url)
-        # Limpieza inicial de espacios en los nombres de las columnas
         df.columns = df.columns.str.strip()
 
-        # AJUSTE DE MAPEO (Corregido)
+        # Mapeo de columnas
         mapeo = {
             'Nombre': ['Nombre', 'Jugador', 'NOMBRE'],
             'Club': ['Club', 'Equipo', 'CLUB'],
@@ -34,10 +34,15 @@ def cargar_mercado_oficial(url):
         for oficial, variantes in mapeo.items():
             for variante in variantes:
                 if variante in df.columns:
-                    # Aquí estaba el error: cambié 'variant' por 'variante'
                     df.rename(columns={variante: oficial}, inplace=True)
                     break
         
+        # --- LIMPIEZA DE PRECIOS (Símbolos $, puntos, etc) ---
+        if 'Precio' in df.columns:
+            # Convertimos a string, quitamos todo lo que no sea número y pasamos a entero
+            df['Precio'] = df['Precio'].astype(str).apply(lambda x: re.sub(r'\D', '', x))
+            df['Precio'] = pd.to_numeric(df['Precio'], errors='coerce').fillna(0).astype(int)
+            
         return df
     except Exception as e:
         st.error(f"Error crítico al leer el Excel: {e}")
@@ -87,7 +92,6 @@ st.subheader("🛒 Mercado de Pases")
 
 if df_mercado is not None:
     try:
-        # Cupos basados en tus siglas detectadas
         LIMITES = {"ARQ": 1, "DEF": 4, "VOL": 4, "DEL": 2}
 
         if 'Nombre' in df_mercado.columns and 'Precio' in df_mercado.columns:
