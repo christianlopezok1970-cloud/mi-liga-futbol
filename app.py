@@ -51,7 +51,7 @@ st.sidebar.metric("Presupuesto Actual", f"€{int(presupuesto):,}")
 
 st.sidebar.divider()
 # ZONA DE PELIGRO CON CONFIRMACIÓN
-with st.sidebar.expander("⚠️ Zona de Peligro"):
+with st.sidebar.expander("⚠️ Borrar Equipo"):
     st.write("Esta acción es irreversible.")
     confirmar_reset = st.checkbox("Confirmar que quiero borrar todo")
     if st.button("🚨 Resetear Mi Club", disabled=not confirmar_reset):
