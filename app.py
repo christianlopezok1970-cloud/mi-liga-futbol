@@ -66,18 +66,16 @@ if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
-# --- PRESUPUESTO ACTUALIZADO A 30.000.000 ---
 PRESUPUESTO_INICIAL = 30000000
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
 c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto = c.fetchone()
 
-# Sidebar Info
 st.sidebar.success(f"Usuario: {user_name}")
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
-# --- 5. MERCADO DE PASES ---
+# --- 5. MERCADO DE PASES (EVITAR DUPLICADOS) ---
 with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
     if df_mercado is not None:
         opciones = df_mercado.apply(lambda x: f"{x['Nombre']} ({x['Club']}) - {x['Posicion']} - €{int(x['Precio']):,}", axis=1).tolist()
@@ -86,10 +84,18 @@ with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
         if st.button("Fichar"):
             idx = opciones.index(seleccion)
             j_info = df_mercado.iloc[idx]
+            
+            # Verificar duplicados
+            c.execute("SELECT id FROM jugadores WHERE usuario_id = ? AND nombre = ? AND club = ?", 
+                      (user_id, j_info['Nombre'], j_info['Club']))
+            existe = c.fetchone()
+            
             c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
             total_actual = c.fetchone()[0]
             
-            if presupuesto < int(j_info['Precio']):
+            if existe:
+                st.error(f"Ya tienes a {j_info['Nombre']} en tu equipo.")
+            elif presupuesto < int(j_info['Precio']):
                 st.error("Dinero insuficiente.")
             elif total_actual >= 25:
                 st.error("Plantilla completa (máx 25).")
@@ -98,9 +104,10 @@ with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
                           (user_id, j_info['Nombre'], int(j_info['Precio']), int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
                 c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - int(j_info['Precio']), user_id))
                 conn.commit()
+                st.success(f"¡{j_info['Nombre']} fichado!")
                 st.rerun()
 
-# --- 6. GESTIÓN DE EQUIPO ---
+# --- 6. GESTIÓN DE EQUIPO (REGLA 1-4-4-2) ---
 st.divider()
 
 def obtener_plantilla(uid, es_titular):
@@ -122,13 +129,17 @@ def obtener_plantilla(uid, es_titular):
 titulares = obtener_plantilla(user_id, 1)
 suplentes = obtener_plantilla(user_id, 0)
 
+# LÍMITES TÁCTICOS 1-4-4-2
+LIMITES_TACTICA = {"ARQ": 1, "DEF": 4, "VOL": 4, "DEL": 2}
+
 col_t, col_s = st.columns(2)
 
-# --- COLUMNA TITULARES (ORDENADOS) ---
 with col_t:
     st.header(f"👕 Titulares ({len(titulares)}/11)")
+    st.caption("Formación: 1-4-4-2")
+    
     if len(titulares) < 11:
-        st.warning(f"Faltan {11 - len(titulares)} titulares. Multa de €200k x hueco.")
+        st.warning(f"Equipo incompleto. Multa de €200k por cada posición vacía.")
     
     for j_id, j_nom, j_val, j_pos, j_club, _ in titulares:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})"):
@@ -147,7 +158,6 @@ with col_t:
                 conn.commit()
                 st.rerun()
 
-# --- COLUMNA SUPLENTES ---
 with col_s:
     st.header(f"👟 Suplentes ({len(suplentes)})")
     for j_id, j_nom, j_val, j_pos, j_club, _ in suplentes:
@@ -155,8 +165,13 @@ with col_s:
             st.write(f"Valor: €{int(j_val):,}")
             c1, c2 = st.columns(2)
             if c1.button("🔝 A Titular", key=f"t_{j_id}"):
+                # Contar cuántos hay en esa posición específica ya en titulares
+                count_pos = sum(1 for t in titulares if t[3] == j_pos)
+                
                 if len(titulares) >= 11:
-                    st.error("Ya hay 11 titulares.")
+                    st.error("Ya tienes 11 titulares.")
+                elif count_pos >= LIMITES_TACTICA.get(j_pos, 0):
+                    st.error(f"Cupo lleno para {j_pos} en el 1-4-4-2 (Máx: {LIMITES_TACTICA[j_pos]})")
                 else:
                     c.execute("UPDATE jugadores SET titular = 1 WHERE id = ?", (j_id,))
                     conn.commit()
@@ -167,12 +182,11 @@ with col_s:
                 conn.commit()
                 st.rerun()
 
-# --- SIDEBAR: RESET CON CONFIRMACIÓN ---
+# --- SIDEBAR: RESET ---
 st.sidebar.divider()
 st.sidebar.subheader("Zona de Peligro")
 with st.sidebar.expander("🚨 Reiniciar Perfil"):
-    st.write("Esto borrará a TODOS tus jugadores y reseteará tu presupuesto a €30M.")
-    confirmar_reset = st.checkbox("Estoy seguro de borrar mi equipo")
+    confirmar_reset = st.checkbox("Confirmar borrado total")
     if st.button("BORRAR TODO", disabled=not confirmar_reset, type="primary"):
         c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
         c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
