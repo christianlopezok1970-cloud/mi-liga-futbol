@@ -142,14 +142,22 @@ with st.sidebar.expander("⚙️ Administrar Usuarios"):
         forzar_limpieza()
         st.rerun()
 
-# --- 6. MERCADO DE PASES CON FILTROS AVANZADOS ---
+# --- FUNCIÓN AUXILIAR PARA MONTOS REDUCIDOS ---
+def formatear_monto(valor):
+    if valor >= 1000000:
+        return f"{valor / 1000000:.1f} M"
+    elif valor >= 1000:
+        return f"{int(valor / 1000)} K"
+    return str(int(valor))
+
+# --- 6. MERCADO DE PASES CON MONTOS REDUCIDOS ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
     if df_mercado is not None:
-        # Fila de filtros: Nombre y Rango de Precio
+        # Fila de filtros
         col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
         
         with col_f1:
-            busqueda_nombre = st.text_input("🔍 Buscar por nombre:", placeholder="Ej: Messi", key=f"bus_{st.session_state.version}")
+            busqueda_nombre = st.text_input("🔍 Buscar por nombre:", key=f"bus_{st.session_state.version}")
         
         with col_f2:
             p_min = st.number_input("Min €:", min_value=0, value=0, step=100000, key=f"min_{st.session_state.version}")
@@ -157,7 +165,7 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
         with col_f3:
             p_max = st.number_input("Max €:", min_value=0, value=int(df_mercado['Precio'].max()), step=100000, key=f"max_{st.session_state.version}")
 
-        # Aplicar filtros al DataFrame
+        # Aplicar filtros
         df_filtrado = df_mercado[
             (df_mercado['Nombre'].str.contains(busqueda_nombre, case=False, na=False)) &
             (df_mercado['Precio'] >= p_min) &
@@ -165,14 +173,14 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
         ]
 
         if not df_filtrado.empty:
-            # Orden solicitado: costo / nombre / posicion / equipo
+            # Formato solicitado: Costo (reducido) / Nombre / Posición / Equipo
             opciones_busqueda = df_filtrado.apply(
-                lambda x: f"€{int(x['Precio']):,}/ {x['Nombre']}/ {x['Posicion']}/ {x['Club']}", axis=1
+                lambda x: f"{formatear_monto(x['Precio'])}/ {x['Nombre']}/ {x['Posicion']}/ {x['Club']}", axis=1
             ).tolist()
             
             seleccion_previa = st.selectbox("Seleccionar jugador:", options=opciones_busqueda, key=f"sel_{st.session_state.version}")
             
-            # Obtener datos del seleccionado
+            # Obtener datos
             indice = opciones_busqueda.index(seleccion_previa)
             j_info = df_filtrado.iloc[indice]
             
@@ -181,7 +189,7 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
                 <div style="background-color: #1E1E1E; padding: 15px; border-radius: 10px; border: 1px solid #333; margin-top: 10px;">
                     <h4 style="margin: 0; color: #FFFFFF; font-weight: 600;">{j_info['Nombre']}</h4>
                     <p style="margin: 5px 0; color: #FFFFFF; opacity: 0.7; font-size: 14px;">{j_info['Club']} | {j_info['Posicion']}</p>
-                    <h3 style="margin: 0; color: #FFFFFF; font-weight: 700;">Precio: €{int(j_info['Precio']):,}</h3>
+                    <h3 style="margin: 0; color: #FFFFFF; font-weight: 700;">Precio: €{formatear_monto(j_info['Precio'])}</h3>
                 </div>
             """, unsafe_allow_html=True)
             
@@ -190,7 +198,7 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
             if st.button("CONFIRMAR FICHAJE", use_container_width=True, type="primary"):
                 c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
                 if c.fetchone()[0] >= 1:
-                    st.error("Ya tienes un jugador. Debes venderlo primero.")
+                    st.error("Ya tienes un jugador.")
                 else:
                     if presupuesto < int(j_info['Precio']):
                         st.error("Presupuesto insuficiente.")
@@ -200,11 +208,10 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
                         c.execute("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (int(j_info['Precio']), user_id))
                         conn.commit()
                         st.success(f"¡{j_info['Nombre']} contratado!")
-                        forzar_limpieza() # Limpia los buscadores tras la compra
+                        forzar_limpieza() 
                         st.rerun()
         else:
-            st.warning("No se encontraron jugadores con esos filtros.")
-
+            st.warning("No hay resultados.")
 # --- 7. GESTIÓN DEL JUGADOR ---
 st.divider()
 st.markdown("### 📋 Gestión del Jugador")
