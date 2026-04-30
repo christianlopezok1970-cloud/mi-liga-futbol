@@ -60,7 +60,6 @@ def calcular_ajuste_prestigio(pts):
     return 0
 
 # --- 4. GESTIÓN DE RESET DE COMPONENTES ---
-# Esto genera un número que cambia cada vez que ejecutamos una acción
 if 'version' not in st.session_state:
     st.session_state.version = 0
 
@@ -74,6 +73,12 @@ st.markdown("## ⚽ Liga Argentina Manager")
 user_name = st.sidebar.text_input("Usuario").strip()
 if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
+    # --- MOSTRAR RANKING INCLUSO SIN LOGIN ---
+    st.sidebar.divider()
+    st.sidebar.subheader("🏆 Top Managers")
+    c.execute("SELECT nombre, prestigio FROM usuarios ORDER BY prestigio DESC LIMIT 5")
+    for i, (n, p) in enumerate(c.fetchall(), 1):
+        st.sidebar.write(f"{i}. {n} ({p} pts)")
     st.stop()
 
 PRESUPUESTO_INICIAL = 2000000
@@ -84,7 +89,7 @@ conn.commit()
 c.execute("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto, prestigio = c.fetchone()
 
-# Estilos Prestigio
+# Estilo Prestigio
 color_numero = "#FF0000"
 if prestigio >= 90: color_numero = "#40E0D0"
 elif prestigio >= 80: color_numero = "#00FF00"
@@ -101,9 +106,8 @@ st.sidebar.markdown(f"""
 st.sidebar.divider()
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
-# --- PRÉSTAMO CON RESET ---
+# --- PRÉSTAMO ---
 with st.sidebar.expander("💰 Solicitar Préstamo"):
-    # La key cambia si st.session_state.version cambia
     conf_prestamo = st.checkbox("Confirmar condiciones", key=f"pres_{st.session_state.version}")
     if st.button("PEDIR PRÉSTAMO", disabled=not conf_prestamo, use_container_width=True):
         c.execute("UPDATE usuarios SET presupuesto = presupuesto + 1000000, prestigio = MAX(1, prestigio - 5) WHERE id = ?", (user_id,))
@@ -111,9 +115,35 @@ with st.sidebar.expander("💰 Solicitar Préstamo"):
         forzar_limpieza()
         st.rerun()
 
-# --- 6. MERCADO ---
+# --- RANKING ---
 st.sidebar.divider()
-with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
+st.sidebar.subheader("🏆 Ranking")
+c.execute("SELECT nombre, prestigio, presupuesto FROM usuarios ORDER BY prestigio DESC, presupuesto DESC LIMIT 5")
+for i, (nom, pres, plata) in enumerate(c.fetchall(), 1):
+    medalla = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "👤"
+    st.sidebar.markdown(f"{medalla} **{nom}** ({pres} pts)")
+
+# --- BORRAR USUARIO (ADMIN) ---
+st.sidebar.divider()
+with st.sidebar.expander("⚙️ Administrar Usuarios"):
+    c.execute("SELECT nombre FROM usuarios")
+    todos_usuarios = [row[0] for row in c.fetchall()]
+    usuario_a_borrar = st.selectbox("Seleccionar usuario para eliminar:", todos_usuarios)
+    
+    conf_borrar = st.checkbox(f"Confirmar eliminar a {usuario_a_borrar}", key=f"del_{st.session_state.version}")
+    
+    if st.button("ELIMINAR USUARIO DEFINITIVAMENTE", disabled=not conf_borrar, type="primary", use_container_width=True):
+        # Primero borramos sus jugadores por la integridad de la base de datos
+        c.execute("DELETE FROM jugadores WHERE usuario_id = (SELECT id FROM usuarios WHERE nombre = ?)", (usuario_a_borrar,))
+        # Luego borramos al usuario
+        c.execute("DELETE FROM usuarios WHERE nombre = ?", (usuario_a_borrar,))
+        conn.commit()
+        st.success(f"Usuario {usuario_a_borrar} eliminado.")
+        forzar_limpieza()
+        st.rerun()
+
+# --- 6. MERCADO ---
+with st.expander("🛒 Mercado de Pases"):
     if df_mercado is not None:
         opciones = df_mercado.apply(lambda x: f"{x['Nombre']} ({x['Club']}) - {x['Posicion']} - €{int(x['Precio']):,}", axis=1).tolist()
         seleccion = st.selectbox("Buscar jugador:", options=opciones)
@@ -154,7 +184,6 @@ else:
         st.divider()
         col1, col2 = st.columns(2)
         with col1:
-            # Checkbox de venta con key dinámica
             cv = st.checkbox(f"Vender por €{int(j_val*0.98):,}", key=f"v_{st.session_state.version}")
             if st.button("🗑️ Vender", disabled=not cv, use_container_width=True):
                 c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
@@ -163,7 +192,6 @@ else:
                 forzar_limpieza()
                 st.rerun()
         with col2:
-            # Checkbox de procesar con key dinámica
             cp = st.checkbox("Confirmar Fecha", key=f"p_{st.session_state.version}")
             if st.button("✅ PROCESAR", disabled=not cp, type="primary", use_container_width=True):
                 nuevo_p = max(1, min(100, prestigio + ajuste_p))
@@ -172,43 +200,13 @@ else:
                 forzar_limpieza()
                 st.rerun()
 
-# --- 8. REINICIO ---
+# --- 8. REINICIO PERSONAL ---
 st.sidebar.divider()
-with st.sidebar.expander("Reiniciar Carrera"):
-    # Checkbox de reinicio con key dinámica
-    cr = st.checkbox("Borrar todo", key=f"r_{st.session_state.version}")
-    if st.button("EJECUTAR REINICIO", disabled=not cr, type="primary", use_container_width=True):
+with st.sidebar.expander("Reiniciar Mi Carrera"):
+    cr = st.checkbox("Borrar mis datos", key=f"r_{st.session_state.version}")
+    if st.button("REINICIAR", disabled=not cr, type="primary", use_container_width=True):
         c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
         c.execute("UPDATE usuarios SET presupuesto = ?, prestigio = ? WHERE id = ?", (PRESUPUESTO_INICIAL, PRESTIGIO_INICIAL, user_id))
         conn.commit()
         forzar_limpieza()
         st.rerun()
-
-# --- 9. RANKING DE MANAGERS (SALÓN DE LA FAMA) ---
-st.sidebar.divider()
-st.sidebar.subheader("🏆 Top 5 Managers")
-
-# Consulta para obtener a los mejores
-# Ordenamos por Prestigio (DESC) y luego por Presupuesto (DESC)
-c.execute("""
-    SELECT nombre, prestigio, presupuesto 
-    FROM usuarios 
-    ORDER BY prestigio DESC, presupuesto DESC 
-    LIMIT 5
-""")
-ranking = c.fetchall()
-
-# Crear una tabla visualmente atractiva en la sidebar
-if ranking:
-    for i, (nom, pres, plata) in enumerate(ranking, 1):
-        # Emoji especial para el podio
-        medalla = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "👤"
-        
-        # Formato de cada fila del ranking
-        st.sidebar.markdown(f"""
-            **{medalla} {i}. {nom}**  
-            ⭐ `{pres} pts` | 💰 `€{int(plata):,}`
-            ---
-        """)
-else:
-    st.sidebar.info("Aún no hay managers en el ranking.")
