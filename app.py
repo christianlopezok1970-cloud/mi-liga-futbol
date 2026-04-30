@@ -17,7 +17,7 @@ c.execute('''CREATE TABLE IF NOT EXISTS jugadores
               FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
 conn.commit()
 
-# --- 2. FUNCIÓN PARA CARGAR EL EXCEL ---
+# --- 2. CARGA DE DATOS ---
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 @st.cache_data(ttl=300)
@@ -63,7 +63,7 @@ def calcular_ajuste_prestigio(pts):
     elif 8.0 <= pts <= 10.0: return 5
     return 0
 
-# --- 4. INTERFAZ ---
+# --- 4. INTERFAZ Y ESTADOS ---
 st.set_page_config(page_title="Liga Argentina Manager", layout="wide")
 st.markdown("## ⚽ Liga Argentina Manager")
 
@@ -71,6 +71,10 @@ user_name = st.sidebar.text_input("Usuario").strip()
 if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
+
+# Inicializar estados de limpieza si no existen
+if 'limpiar' not in st.session_state:
+    st.session_state.limpiar = False
 
 PRESUPUESTO_INICIAL = 2000000
 PRESTIGIO_INICIAL = 40
@@ -80,7 +84,7 @@ conn.commit()
 c.execute("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto, prestigio = c.fetchone()
 
-# Estilo Prestigio
+# Lógica de Colores Prestigio
 color_numero = "#FF0000"
 if prestigio >= 90: color_numero = "#40E0D0"
 elif prestigio >= 80: color_numero = "#00FF00"
@@ -97,15 +101,17 @@ st.sidebar.markdown(f"""
 st.sidebar.divider()
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
-# --- PRÉSTAMO CON AUTOLIMPIEZA ---
+# --- PRÉSTAMO ---
 with st.sidebar.expander("💰 Solicitar Préstamo"):
     st.write("Recibe **€1,000,000** inmediatos. Costo: **-5 puntos**.")
-    conf_prestamo = st.checkbox("Confirmar condiciones", key="chk_pres")
+    # Usamos el session_state para resetear el valor
+    val_pres = False if st.session_state.limpiar else None
+    conf_prestamo = st.checkbox("Confirmar condiciones", key="chk_pres", value=val_pres)
+    
     if st.button("PEDIR PRÉSTAMO", disabled=not conf_prestamo, use_container_width=True):
-        nuevo_presupuesto = presupuesto + 1000000
-        nuevo_prestigio = max(1, prestigio - 5)
-        c.execute("UPDATE usuarios SET presupuesto = ?, prestigio = ? WHERE id = ?", (nuevo_presupuesto, nuevo_prestigio, user_id))
+        c.execute("UPDATE usuarios SET presupuesto = presupuesto + 1000000, prestigio = MAX(1, prestigio - 5) WHERE id = ?", (user_id,))
         conn.commit()
+        st.session_state.limpiar = True
         st.rerun()
 
 # --- 5. MERCADO ---
@@ -134,57 +140,67 @@ st.divider()
 st.markdown("### 📋 Gestión del Jugador")
 
 c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario_id = ? ORDER BY posicion ASC", (user_id,))
-plantel = c.fetchall()
+jugador = c.fetchone()
 
-if not plantel:
+if not jugador:
     st.info("Sin jugador asignado. Ve al mercado.")
 else:
-    for j_id, j_nom, j_val, j_pos, j_club in plantel:
-        with st.expander(f"{j_pos} | {j_nom.upper()} ({j_club})", expanded=True):
-            st.write(f"**Valor:** :orange[€{int(j_val):,}]")
-            st.write(f"**Sueldo x partido:** :orange[€{int(j_val * PORCENTAJE_SUELDO):,}]")
-            
-            pts = st.number_input("Puntaje de la fecha:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
-            neto = calcular_resultado_neto(pts, j_val)
-            ajuste_p = calcular_ajuste_prestigio(pts)
-            
-            c_neto = "green" if neto >= 0 else "red"
-            c_pres = "green" if ajuste_p >= 0 else "red"
-            st.markdown(f"**Balance:** :{c_neto}[{'+' if neto >= 0 else ''}€{neto:,}]")
-            st.markdown(f"**Prestigio:** :{c_pres}[{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts]")
-            
-            st.divider() 
-            col_vender, col_procesar = st.columns(2)
-            
-            with col_vender:
-                st.write("⚠️ **Venta**")
-                monto_v = j_val - (j_val * PORCENTAJE_SUELDO)
-                conf_v = st.checkbox(f"Vender por €{int(monto_v):,}", key=f"chk_v_{j_id}")
-                if st.button("🗑️ Vender Jugador", key=f"btn_v_{j_id}", disabled=not conf_v, use_container_width=True):
-                    c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
-                    c.execute("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_v, user_id))
-                    conn.commit()
-                    # El st.rerun limpia el checkbox automáticamente al recargar
-                    st.rerun()
+    j_id, j_nom, j_val, j_pos, j_club = jugador
+    with st.expander(f"{j_pos} | {j_nom.upper()} ({j_club})", expanded=True):
+        st.write(f"**Valor:** :orange[€{int(j_val):,}]")
+        st.write(f"**Sueldo x partido:** :orange[€{int(j_val * PORCENTAJE_SUELDO):,}]")
+        
+        pts = st.number_input("Puntaje de la fecha:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
+        neto = calcular_resultado_neto(pts, j_val)
+        ajuste_p = calcular_ajuste_prestigio(pts)
+        
+        c_neto = "green" if neto >= 0 else "red"
+        c_pres = "green" if ajuste_p >= 0 else "red"
+        st.markdown(f"**Balance:** :{c_neto}[{'+' if neto >= 0 else ''}€{neto:,}]")
+        st.markdown(f"**Prestigio:** :{c_pres}[{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts]")
+        
+        st.divider() 
+        col_vender, col_procesar = st.columns(2)
+        
+        with col_vender:
+            st.write("⚠️ **Venta**")
+            monto_v = j_val - (j_val * PORCENTAJE_SUELDO)
+            val_v = False if st.session_state.limpiar else None
+            conf_v = st.checkbox(f"Vender por €{int(monto_v):,}", key=f"cv_{j_id}", value=val_v)
+            if st.button("🗑️ Vender Jugador", key=f"bv_{j_id}", disabled=not conf_v, use_container_width=True):
+                c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
+                c.execute("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_v, user_id))
+                conn.commit()
+                st.session_state.limpiar = True
+                st.rerun()
 
-            with col_procesar:
-                st.write("🚀 **Procesar**")
-                conf_p = st.checkbox("Confirmar resultados", key=f"chk_p_{j_id}")
-                if st.button("✅ PROCESAR FECHA", key=f"btn_p_{j_id}", disabled=not conf_p, type="primary", use_container_width=True):
-                    if (presupuesto + neto) < 0:
-                        st.error("Saldo insuficiente.")
-                    else:
-                        nuevo_p = max(1, min(100, prestigio + ajuste_p))
-                        c.execute("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", (neto, nuevo_p, user_id))
-                        conn.commit()
-                        st.rerun()
+        with col_procesar:
+            st.write("🚀 **Procesar**")
+            val_p = False if st.session_state.limpiar else None
+            conf_p = st.checkbox("Confirmar resultados", key=f"cp_{j_id}", value=val_p)
+            if st.button("✅ PROCESAR FECHA", key=f"bp_{j_id}", disabled=not conf_p, type="primary", use_container_width=True):
+                if (presupuesto + neto) < 0:
+                    st.error("Saldo insuficiente.")
+                else:
+                    nuevo_p = max(1, min(100, prestigio + ajuste_p))
+                    c.execute("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", (neto, nuevo_p, user_id))
+                    conn.commit()
+                    st.session_state.limpiar = True
+                    st.rerun()
 
 # --- 7. REINICIO ---
 st.sidebar.divider()
 with st.sidebar.expander("Reiniciar Carrera"):
-    conf_reinicio = st.checkbox("Confirmar reinicio total", key="chk_reinicio")
+    val_r = False if st.session_state.limpiar else None
+    conf_reinicio = st.checkbox("Confirmar reinicio total", key="chk_re", value=val_r)
     if st.button("EJECUTAR REINICIO", disabled=not conf_reinicio, type="primary", use_container_width=True):
         c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
         c.execute("UPDATE usuarios SET presupuesto = ?, prestigio = ? WHERE id = ?", (PRESUPUESTO_INICIAL, PRESTIGIO_INICIAL, user_id))
         conn.commit()
+        st.session_state.limpiar = True
         st.rerun()
+
+# Al final del script, resetear la bandera de limpieza
+if st.session_state.limpiar:
+    st.session_state.limpiar = False
+    st.rerun()
