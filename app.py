@@ -47,13 +47,9 @@ VALOR_POR_PASO = 20000
 PORCENTAJE_SUELDO = 0.0125 # 1.25%
 
 def calcular_resultado_neto(puntaje, valor_jugador):
-    # Ganancia por rendimiento (cada 0.1 sobre 6.4 = €20.000)
     pasos = (puntaje - 6.4) / 0.1
     ganancia_puntos = int(pasos * VALOR_POR_PASO)
-    
-    # Costo del sueldo (1.25% del valor de compra)
     costo_sueldo = valor_jugador * PORCENTAJE_SUELDO
-    
     return int(ganancia_puntos - costo_sueldo)
 
 # --- 4. INTERFAZ ---
@@ -86,7 +82,7 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
             
             c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
             if c.fetchone()[0] >= 1:
-                st.error("Ya tienes 1 jugador. Debes venderlo antes de comprar uno nuevo.")
+                st.error("Ya tienes 1 jugador.")
             elif presupuesto < int(j_info['Precio']):
                 st.error("No tienes dinero suficiente.")
             else:
@@ -94,7 +90,6 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
                           (user_id, j_info['Nombre'], int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
                 c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - int(j_info['Precio']), user_id))
                 conn.commit()
-                st.success(f"¡{j_info['Nombre']} fichado!")
                 st.rerun()
 
 # --- 6. GESTIÓN DE PLANTEL ---
@@ -109,14 +104,10 @@ if not plantel:
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
-            # Información Financiera
             st.write(f"**Valor de Fichaje:** €{int(j_val):,}")
-            st.write(f"**Sueldo x Partido:** €{int(j_val * PORCENTAJE_SUELDO):,}")
+            st.write(f"**Sueldo x partido (1.25%):** €{int(j_val * PORCENTAJE_SUELDO):,}")
             
-            # Entrada de puntos
             pts = st.number_input("Puntaje obtenido:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
-            
-            # Cálculo del resultado neto
             neto_final = calcular_resultado_neto(pts, j_val)
             
             if neto_final >= 0:
@@ -126,25 +117,28 @@ else:
             
             col1, col2 = st.columns(2)
             
-            if col1.button("✅ Cargar Puntos (Sueldo incluido)", key=f"a_{j_id}"):
-                nuevo_presupuesto = presupuesto + neto_final
-                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
-                conn.commit()
-                st.toast(f"Balance aplicado: €{neto_final:,}")
-                st.rerun()
+            if col1.button("✅ Cargar Puntos", key=f"a_{j_id}"):
+                if (presupuesto + neto_final) < 0:
+                    st.error("Error: Esta operación dejaría tu cuenta en negativo. ¡No tienes fondos para pagar el sueldo!")
+                else:
+                    nuevo_presupuesto = presupuesto + neto_final
+                    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
+                    conn.commit()
+                    st.rerun()
                 
             if col2.button("🗑️ Vender Jugador", key=f"v_{j_id}"):
-                # Al vender: Recuperas Valor - 1 Sueldo
                 costo_sueldo_venta = j_val * PORCENTAJE_SUELDO
                 monto_recuperado = j_val - costo_sueldo_venta
                 
-                c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
-                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + monto_recuperado, user_id))
-                conn.commit()
-                st.warning(f"Vendido por €{int(monto_recuperado):,} (Se descontó 1 sueldo de comisión)")
-                st.rerun()
+                if (presupuesto + monto_recuperado) < 0:
+                    st.error("No puedes vender al jugador porque el descuento de comisión te dejaría en negativo.")
+                else:
+                    c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
+                    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + monto_recuperado, user_id))
+                    conn.commit()
+                    st.rerun()
 
-# --- 7. ZONA DE REINICIO ---
+# --- 7. REINICIO ---
 st.sidebar.divider()
 with st.sidebar.expander("🚨 Reiniciar Perfil"):
     confirmar = st.checkbox("Confirmar reinicio")
