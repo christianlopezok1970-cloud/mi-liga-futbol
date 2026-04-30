@@ -101,17 +101,17 @@ color_numero = "#FF0000" # Rojo (1-39)
 if prestigio >= 90: 
     color_numero = "#40E0D0" # Turquesa (90-100)
 elif prestigio >= 80: 
-    color_numero = "#00FF00" # Verde (80-89) - Usamos un verde más brillante para fondo negro
+    color_numero = "#00FF00" # Verde (80-89)
 elif prestigio >= 60: 
     color_numero = "#FFFF00" # Amarillo (60-79)
 elif prestigio >= 40: 
     color_numero = "#FFA500" # Naranja (40-59)
 
-# Cuadro de Prestigio Estilizado
+# Cuadro de Prestigio Estilizado - MODO IMPACTO
 st.sidebar.markdown(f"""
-    <div style="background-color: #1E1E1E; padding: 20px; border-radius: 15px; text-align: center; border: 2px solid #333 shadow: 5px 5px 15px rgba(0,0,0,0.5);">
-        <p style="color: #AAAAAA; margin: 0; font-weight: bold; font-size: 14px; letter-spacing: 2px;">PRESTIGIO</p>
-        <h1 style="color: {color_numero}; margin: 0; font-size: 64px; font-family: 'Courier New', Courier, monospace; line-height: 1;">{prestigio}</h1>
+    <div style="background-color: #000000; padding: 25px 10px; border-radius: 15px; text-align: center; border: 1px solid #333;">
+        <p style="color: #666666; margin: 0; font-weight: bold; font-size: 12px; letter-spacing: 3px; text-transform: uppercase;">Prestigio</p>
+        <h1 style="color: {color_numero}; margin: 0; font-size: 80px; font-weight: 900; font-family: 'Arial Black', sans-serif; line-height: 1;">{prestigio}</h1>
     </div>
     """, unsafe_allow_html=True)
 
