@@ -2,7 +2,7 @@ import streamlit as st
 import sqlite3
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v10.db'
+DB_NAME = 'agencia_global_v11.db'
 
 def ejecutar_db(query, params=(), commit=False):
     with sqlite3.connect(DB_NAME, check_same_thread=False) as conn:
@@ -45,7 +45,7 @@ st.set_page_config(page_title="World Transfer Market", layout="wide")
 if 'version' not in st.session_state:
     st.session_state.version = 0
 
-# TÍTULO REDUCIDO
+# TÍTULO PRINCIPAL (H3)
 st.subheader("🌎 World Transfer Market")
 
 manager = st.sidebar.text_input("Nombre del Agente:").strip()
@@ -73,13 +73,10 @@ if prestigio >= 10:
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 1000000, prestigio = prestigio - 10 WHERE id = ?", (u_id,), commit=True)
             st.session_state.version += 1
             st.rerun()
-else:
-    st.sidebar.error("Reputación baja.")
 
-# BOTÓN RESET CON PALABRA CLAVE
 st.sidebar.divider()
 with st.sidebar.expander("⚠️ Zona de Peligro"):
-    st.write("Para resetear, escribe: **BORRAR**")
+    st.write("Escribe **BORRAR** para resetear:")
     clave = st.text_input("Palabra clave", key="reset_key").upper()
     if st.button("RESETEAR TODO EL JUEGO", type="secondary", disabled=(clave != "BORRAR")):
         ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
@@ -107,7 +104,9 @@ with st.expander("🔍 Scouting Global"):
         st.rerun()
 
 # --- 5. PANEL DE ACTIVOS ---
-st.header("📋 Cartera de Activos")
+# TÍTULO REDUCIDO (H5) Y RENOMBRADO
+st.markdown("##### 📋 Jugadores Representados")
+
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club, liga FROM cartera WHERE usuario_id = ?", (u_id,))
 
 if not cartera:
