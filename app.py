@@ -3,9 +3,6 @@ import sqlite3
 import pandas as pd
 import re
 
-# --- CONFIGURACIÓN DE CONTROL ---
-MERCADO_ABIERTO = True 
-
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
 conn = sqlite3.connect('liga_futbol.db', check_same_thread=False)
 c = conn.cursor()
@@ -50,14 +47,13 @@ VALOR_POR_PASO = 20000
 PORCENTAJE_SUELDO = 0.0012 # 0.12%
 
 def calcular_resultado_neto(puntaje, valor_jugador):
-    # Ganancia por puntos
+    # Ganancia por rendimiento (cada 0.1 sobre 6.4 = €20.000)
     pasos = (puntaje - 6.4) / 0.1
     ganancia_puntos = int(pasos * VALOR_POR_PASO)
     
-    # Gasto por sueldo (0.12%)
+    # Costo del sueldo (0.12% del valor de compra)
     costo_sueldo = valor_jugador * PORCENTAJE_SUELDO
     
-    # Resultado final que impacta en el presupuesto
     return int(ganancia_puntos - costo_sueldo)
 
 # --- 4. INTERFAZ ---
@@ -66,9 +62,10 @@ st.title("⚽ Liga Argentina Manager")
 
 user_name = st.sidebar.text_input("Usuario").strip()
 if not user_name:
-    st.info("👋 Ingresa tu nombre para comenzar.")
+    st.info("👋 Ingresa tu nombre en la barra lateral para comenzar.")
     st.stop()
 
+# Presupuesto inicial configurado en €2.000.000
 PRESUPUESTO_INICIAL = 2000000
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
@@ -76,15 +73,13 @@ c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto = c.fetchone()
 
 st.sidebar.success(f"Usuario: {user_name}")
-st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
+st.sidebar.metric("Tu Dinero", f"€{int(presupuesto):,}")
 
-# --- 5. MERCADO DE PASES (LIMITE 1 JUGADOR) ---
+# --- 5. MERCADO DE PASES ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
-    if not MERCADO_ABIERTO:
-        st.warning("Mercado cerrado.")
-    elif df_mercado is not None:
+    if df_mercado is not None:
         opciones = df_mercado.apply(lambda x: f"{x['Nombre']} ({x['Club']}) - {x['Posicion']} - €{int(x['Precio']):,}", axis=1).tolist()
-        seleccion = st.selectbox("Buscar jugador:", options=opciones)
+        seleccion = st.selectbox("Buscar jugador para fichar:", options=opciones)
         
         if st.button("Confirmar Fichaje"):
             idx = opciones.index(seleccion)
@@ -92,15 +87,15 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
             
             c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
             if c.fetchone()[0] >= 1:
-                st.error("Ya tienes 1 jugador. Véndelo para comprar otro.")
+                st.error("Ya tienes 1 jugador. Debes venderlo antes de comprar uno nuevo.")
             elif presupuesto < int(j_info['Precio']):
-                st.error("Dinero insuficiente.")
+                st.error("No tienes dinero suficiente para este fichaje.")
             else:
                 c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion, club) VALUES (?,?,?,?,?)",
                           (user_id, j_info['Nombre'], int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
                 c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - int(j_info['Precio']), user_id))
                 conn.commit()
-                st.success("Fichaje exitoso!")
+                st.success(f"¡{j_info['Nombre']} se ha unido a tu equipo!")
                 st.rerun()
 
 # --- 6. GESTIÓN DE PLANTEL ---
@@ -111,42 +106,47 @@ c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario
 plantel = c.fetchall()
 
 if not plantel:
-    st.info("No tienes ningún jugador.")
+    st.info("Actualmente no tienes ningún jugador fichado.")
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
-            st.write(f"**Valor del Jugador: €{int(j_val):,}**")
+            # Información Financiera
+            st.write(f"**Valor de Fichaje:** €{int(j_val):,}")
+            st.write(f"**Sueldo por partido (0.12%):** €{int(j_val * PORCENTAJE_SUELDO):,}")
             
-            pts = st.number_input("Puntos obtenidos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
+            # Entrada de puntos
+            pts = st.number_input("Puntaje obtenido en la fecha:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             
-            # Calculamos el neto (Ganancia - Sueldo)
+            # Cálculo del resultado neto
             neto_final = calcular_resultado_neto(pts, j_val)
             
             if neto_final >= 0:
-                st.write(f"📊 Resultado neto: **+€{neto_final:,}** (Puntos - Sueldo)")
+                st.write(f"📊 Balance del partido: **+€{neto_final:,}** (Rendimiento - Sueldo)")
             else:
-                st.write(f"📊 Resultado neto: **-€{abs(neto_final):,}** (Puntos - Sueldo)")
+                st.write(f"📊 Balance del partido: **-€{abs(neto_final):,}** (Sueldo - Rendimiento)")
             
-            c1, c2 = st.columns(2)
-            if c1.button("✅ Cargar Puntos", key=f"a_{j_id}"):
+            col1, col2 = st.columns(2)
+            
+            if col1.button("✅ Cargar Puntos y Pagar Sueldo", key=f"a_{j_id}"):
                 nuevo_presupuesto = presupuesto + neto_final
                 c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
                 conn.commit()
-                st.toast(f"Balance aplicado: {neto_final}")
+                st.toast(f"Presupuesto actualizado: €{neto_final:,}")
                 st.rerun()
                 
-            if MERCADO_ABIERTO:
-                if c2.button("🗑️ Vender", key=f"v_{j_id}"):
-                    c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
-                    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_val, user_id))
-                    conn.commit()
-                    st.rerun()
+            if col2.button("🗑️ Vender Jugador", key=f"v_{j_id}"):
+                # Al vender recuperas el valor original
+                c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_val, user_id))
+                conn.commit()
+                st.rerun()
 
-# --- SIDEBAR: RESET ---
+# --- 7. ZONA DE REINICIO ---
 st.sidebar.divider()
 with st.sidebar.expander("🚨 Reiniciar Perfil"):
-    confirmar = st.checkbox("Confirmar borrado")
-    if st.button("BORRAR TODO", disabled=not confirmar, type="primary"):
+    st.write("Se borrará tu jugador y volverás a los €2.000.000 iniciales.")
+    confirmar = st.checkbox("Confirmar reinicio")
+    if st.button("REINICIAR TODO", disabled=not confirmar, type="primary"):
         c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
         c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (PRESUPUESTO_INICIAL, user_id))
         conn.commit()
