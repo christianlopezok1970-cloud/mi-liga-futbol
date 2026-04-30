@@ -12,7 +12,7 @@ c = conn.cursor()
 c.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL)')
 c.execute('''CREATE TABLE IF NOT EXISTS jugadores 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, 
-              valor REAL, valor_anterior REAL, posicion TEXT, club TEXT,
+              valor REAL, posicion TEXT, club TEXT,
               FOREIGN KEY(usuario_id) REFERENCES usuarios(id))''')
 conn.commit()
 
@@ -48,26 +48,20 @@ df_mercado = cargar_mercado_oficial(SHEET_CSV_URL)
 # --- 3. LÓGICA DE NEGOCIO ---
 VALOR_POR_PASO = 20000 
 
-def calcular_nuevo_valor_fijo(valor_actual, puntaje):
+def calcular_ganancia(puntaje):
+    # Calcula cuánto dinero se suma/resta al presupuesto
     pasos = (puntaje - 6.4) / 0.1
-    variacion = pasos * VALOR_POR_PASO
-    return int(max(0, valor_actual + variacion))
+    return int(pasos * VALOR_POR_PASO)
 
 # --- 4. INTERFAZ ---
 st.set_page_config(page_title="Liga Argentina Manager", layout="wide")
 st.title("⚽ Liga Argentina Manager")
-
-if MERCADO_ABIERTO:
-    st.success("🟢 MERCADO ABIERTO")
-else:
-    st.error("🔴 MERCADO CERRADO")
 
 user_name = st.sidebar.text_input("Usuario").strip()
 if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
-# --- NUEVO PRESUPUESTO: 2.000.000 ---
 PRESUPUESTO_INICIAL = 2000000
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
@@ -89,8 +83,6 @@ if st.sidebar.button("💸 Pagar Sueldos (0.1%)"):
         conn.commit()
         st.sidebar.warning(f"Sueldos pagados: -€{int(total_sueldos):,}")
         st.rerun()
-    else:
-        st.sidebar.info("No tienes jugadores.")
 
 # --- 5. MERCADO DE PASES (LIMITE 1 JUGADOR) ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
@@ -105,16 +97,13 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
             j_info = df_mercado.iloc[idx]
             
             c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
-            total_actual = c.fetchone()[0]
-            
-            # NUEVO LÍMITE: 1
-            if total_actual >= 1:
+            if c.fetchone()[0] >= 1:
                 st.error("Ya tienes 1 jugador. Véndelo para comprar otro.")
             elif presupuesto < int(j_info['Precio']):
                 st.error("Dinero insuficiente.")
             else:
-                c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion, club) VALUES (?,?,?,?,?,?)",
-                          (user_id, j_info['Nombre'], int(j_info['Precio']), int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
+                c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion, club) VALUES (?,?,?,?,?)",
+                          (user_id, j_info['Nombre'], int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
                 c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - int(j_info['Precio']), user_id))
                 conn.commit()
                 st.success("Fichaje exitoso!")
@@ -128,24 +117,32 @@ c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario
 plantel = c.fetchall()
 
 if not plantel:
-    st.info("No tienes ningún jugador en tu equipo.")
+    st.info("No tienes ningún jugador.")
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
-            st.write(f"**Valor Actual: €{int(j_val):,}**")
+            st.write(f"**Valor del Jugador (Fijo): €{int(j_val):,}**")
             st.write(f"Sueldo (0.1%): €{int(j_val * 0.001):,}")
             
             pts = st.number_input("Puntos obtenidos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
+            ganancia_neta = calcular_ganancia(pts)
+            
+            if ganancia_neta >= 0:
+                st.write(f"💰 Ganancia estimada: **+€{ganancia_neta:,}**")
+            else:
+                st.write(f"📉 Pérdida estimada: **-€{abs(ganancia_neta):,}**")
             
             c1, c2 = st.columns(2)
-            if c1.button("✅ Actualizar Valor", key=f"a_{j_id}"):
-                nuevo_v = calcular_nuevo_valor_fijo(j_val, pts)
-                c.execute("UPDATE jugadores SET valor_anterior = valor, valor = ? WHERE id = ?", (nuevo_v, j_id))
+            if c1.button("✅ Cargar Puntos", key=f"a_{j_id}"):
+                nuevo_presupuesto = presupuesto + ganancia_neta
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
                 conn.commit()
+                st.toast(f"Presupuesto actualizado: {ganancia_neta}")
                 st.rerun()
                 
             if MERCADO_ABIERTO:
                 if c2.button("🗑️ Vender", key=f"v_{j_id}"):
+                    # Al vender, recuperas exactamente lo que valía el jugador
                     c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
                     c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_val, user_id))
                     conn.commit()
