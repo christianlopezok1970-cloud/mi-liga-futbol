@@ -47,11 +47,18 @@ df_mercado = cargar_mercado_oficial(SHEET_CSV_URL)
 
 # --- 3. LÓGICA DE NEGOCIO ---
 VALOR_POR_PASO = 20000 
+PORCENTAJE_SUELDO = 0.0012 # 0.12%
 
-def calcular_ganancia(puntaje):
-    # Calcula cuánto dinero se suma/resta al presupuesto
+def calcular_resultado_neto(puntaje, valor_jugador):
+    # Ganancia por puntos
     pasos = (puntaje - 6.4) / 0.1
-    return int(pasos * VALOR_POR_PASO)
+    ganancia_puntos = int(pasos * VALOR_POR_PASO)
+    
+    # Gasto por sueldo (0.12%)
+    costo_sueldo = valor_jugador * PORCENTAJE_SUELDO
+    
+    # Resultado final que impacta en el presupuesto
+    return int(ganancia_puntos - costo_sueldo)
 
 # --- 4. INTERFAZ ---
 st.set_page_config(page_title="Liga Argentina Manager", layout="wide")
@@ -70,19 +77,6 @@ user_id, presupuesto = c.fetchone()
 
 st.sidebar.success(f"Usuario: {user_name}")
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
-
-# --- BOTÓN PAGAR SUELDOS ---
-st.sidebar.divider()
-if st.sidebar.button("💸 Pagar Sueldos (0.1%)"):
-    c.execute("SELECT valor FROM jugadores WHERE usuario_id = ?", (user_id,))
-    valores = c.fetchall()
-    if valores:
-        total_sueldos = sum(v[0] for v in valores) * 0.001
-        nuevo_presupuesto = presupuesto - total_sueldos
-        c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
-        conn.commit()
-        st.sidebar.warning(f"Sueldos pagados: -€{int(total_sueldos):,}")
-        st.rerun()
 
 # --- 5. MERCADO DE PASES (LIMITE 1 JUGADOR) ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
@@ -121,28 +115,28 @@ if not plantel:
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
-            st.write(f"**Valor del Jugador (Fijo): €{int(j_val):,}**")
-            st.write(f"Sueldo (0.1%): €{int(j_val * 0.001):,}")
+            st.write(f"**Valor del Jugador: €{int(j_val):, }**")
             
             pts = st.number_input("Puntos obtenidos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
-            ganancia_neta = calcular_ganancia(pts)
             
-            if ganancia_neta >= 0:
-                st.write(f"💰 Ganancia estimada: **+€{ganancia_neta:,}**")
+            # Calculamos el neto (Ganancia - Sueldo)
+            neto_final = calcular_resultado_neto(pts, j_val)
+            
+            if neto_final >= 0:
+                st.write(f"📊 Resultado neto: **+€{neto_final:,}** (Puntos - Sueldo)")
             else:
-                st.write(f"📉 Pérdida estimada: **-€{abs(ganancia_neta):,}**")
+                st.write(f"📊 Resultado neto: **-€{abs(neto_final):,}** (Puntos - Sueldo)")
             
             c1, c2 = st.columns(2)
             if c1.button("✅ Cargar Puntos", key=f"a_{j_id}"):
-                nuevo_presupuesto = presupuesto + ganancia_neta
+                nuevo_presupuesto = presupuesto + neto_final
                 c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (nuevo_presupuesto, user_id))
                 conn.commit()
-                st.toast(f"Presupuesto actualizado: {ganancia_neta}")
+                st.toast(f"Balance aplicado: {neto_final}")
                 st.rerun()
                 
             if MERCADO_ABIERTO:
                 if c2.button("🗑️ Vender", key=f"v_{j_id}"):
-                    # Al vender, recuperas exactamente lo que valía el jugador
                     c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
                     c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto + j_val, user_id))
                     conn.commit()
