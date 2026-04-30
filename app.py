@@ -96,20 +96,22 @@ conn.commit()
 c.execute("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto, prestigio = c.fetchone()
 
-# Estilo de Prestigio
-color_p = "#FF0000" # Rojo
-texto_negro = False
-if prestigio >= 90: color_p = "#40E0D0" # Turquesa
-elif prestigio >= 80: color_p = "#008000" # Verde
+# Lógica de Colores para el número (Prestigio)
+color_numero = "#FF0000" # Rojo (1-39)
+if prestigio >= 90: 
+    color_numero = "#40E0D0" # Turquesa (90-100)
+elif prestigio >= 80: 
+    color_numero = "#00FF00" # Verde (80-89) - Usamos un verde más brillante para fondo negro
 elif prestigio >= 60: 
-    color_p = "#FFFF00" # Amarillo
-    texto_negro = True
-elif prestigio >= 40: color_p = "#FFA500" # Naranja
+    color_numero = "#FFFF00" # Amarillo (60-79)
+elif prestigio >= 40: 
+    color_numero = "#FFA500" # Naranja (40-59)
 
+# Cuadro de Prestigio Estilizado
 st.sidebar.markdown(f"""
-    <div style="background-color:{color_p}; padding:15px; border-radius:10px; text-align:center; border: 2px solid rgba(0,0,0,0.1);">
-        <h2 style="color: {'black' if texto_negro else 'white'}; margin:0; font-family:sans-serif;">{prestigio}</h2>
-        <p style="color: {'black' if texto_negro else 'white'}; margin:0; font-weight:bold; letter-spacing: 1px;">PRESTIGIO</p>
+    <div style="background-color: #1E1E1E; padding: 20px; border-radius: 15px; text-align: center; border: 2px solid #333 shadow: 5px 5px 15px rgba(0,0,0,0.5);">
+        <p style="color: #AAAAAA; margin: 0; font-weight: bold; font-size: 14px; letter-spacing: 2px;">PRESTIGIO</p>
+        <h1 style="color: {color_numero}; margin: 0; font-size: 64px; font-family: 'Courier New', Courier, monospace; line-height: 1;">{prestigio}</h1>
     </div>
     """, unsafe_allow_html=True)
 
