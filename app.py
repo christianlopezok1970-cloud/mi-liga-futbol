@@ -115,7 +115,7 @@ if not plantel:
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
-            st.write(f"**Valor del Jugador: €{int(j_val):, }**")
+            st.write(f"**Valor del Jugador: €{int(j_val):,}**")
             
             pts = st.number_input("Puntos obtenidos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             
