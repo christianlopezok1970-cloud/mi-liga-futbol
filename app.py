@@ -1,8 +1,9 @@
 import streamlit as st
 import sqlite3
+import time
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_afa_v6.db'
+DB_NAME = 'agencia_afa_v7.db'
 
 def ejecutar_db(query, params=(), commit=False):
     with sqlite3.connect(DB_NAME, check_same_thread=False) as conn:
@@ -18,7 +19,7 @@ ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre_jugador TEXT, 
               porcentaje REAL, costo_compra REAL, club TEXT)''', commit=True)
 
-# --- 2. FUNCIONES DE FORMATO Y LÓGICA ---
+# --- 2. LÓGICA FINANCIERA ---
 def formatear_monto(monto):
     monto = float(monto)
     abs_monto = abs(monto)
@@ -41,6 +42,11 @@ def calcular_balance_fecha(puntaje, costo_proporcional):
 
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="Agente LPF Pro", layout="wide")
+
+# Inicializar un contador de versiones en el session_state para forzar resets
+if 'version' not in st.session_state:
+    st.session_state.version = 0
+
 st.title("⚽ Agencia LPF: Gestión de Activos")
 
 manager = st.sidebar.text_input("Tu Nombre de Agente:").strip()
@@ -54,28 +60,24 @@ ejecutar_db("INSERT OR IGNORE INTO usuarios (nombre, presupuesto, prestigio) VAL
 datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
 u_id, presupuesto, prestigio = datos[0]
 
-# --- SIDEBAR: DASHBOARD Y PRÉSTAMOS CON AVISO ---
+# --- SIDEBAR ---
 st.sidebar.markdown(f"### Manager: {manager}")
 st.sidebar.metric("Presupuesto", f"€{formatear_monto(presupuesto)}")
 st.sidebar.metric("Prestigio", f"{prestigio} pts")
 
 st.sidebar.divider()
-st.sidebar.subheader("🏦 Financiamiento")
-
 if prestigio >= 10:
-    # Ventana de aviso (Popover)
     with st.sidebar.popover("💰 Solicitar Préstamo"):
         st.warning("¿Confirmas la solicitud de préstamo?")
-        st.write("Recibirás **1.0 M** de liquidez inmediata.")
-        st.write("Costo: **-10 puntos** de prestigio.")
+        st.write("Recibirás **1.0 M**. Costo: **-10 pts prestigio**.")
         if st.button("SÍ, SOLICITAR"):
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 1000000, prestigio = prestigio - 10 WHERE id = ?", (u_id,), commit=True)
-            st.toast("Préstamo acreditado.")
+            st.session_state.version += 1 # Forzar cambio de versión
             st.rerun()
 else:
-    st.sidebar.error("Prestigio insuficiente (<10).")
+    st.sidebar.error("Prestigio insuficiente.")
 
-# --- 4. MERCADO DE PORCENTAJES ---
+# --- 4. MERCADO ---
 with st.expander("🤝 Adquirir Porcentaje de Jugador"):
     c1, c2 = st.columns(2)
     nombre_j = c1.text_input("Nombre del Jugador:")
@@ -84,16 +86,14 @@ with st.expander("🤝 Adquirir Porcentaje de Jugador"):
     pct_compra = c2.slider("% de la ficha:", 5, 100, 10)
     
     costo_final = (valor_100 * pct_compra) / 100
-    st.write(f"Inversión requerida: **€{formatear_monto(costo_final)}**")
+    st.write(f"Inversión: **€{formatear_monto(costo_final)}**")
     
-    puedo_comprar = presupuesto >= costo_final
-    if st.button("FIRMAR CONTRATO", use_container_width=True, type="primary", disabled=not puedo_comprar):
+    if st.button("FIRMAR CONTRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final)):
         ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
                     (u_id, nombre_j, pct_compra, costo_final, club_j), commit=True)
         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_final, u_id), commit=True)
+        st.session_state.version += 1
         st.rerun()
-    if not puedo_comprar:
-        st.caption("No tienes fondos suficientes.")
 
 # --- 5. PANEL DE SEGUIMIENTO ---
 st.header("📈 Cartera de Representados")
@@ -103,38 +103,44 @@ if not cartera:
     st.warning("No tienes jugadores en tu agencia.")
 else:
     for j_id, j_nom, j_pct, j_costo, j_club in cartera:
+        # Usamos la 'version' en la key para que se resetee todo el contenedor
         with st.container(border=True):
             col_info, col_input, col_ops = st.columns([2, 2, 2])
             
             col_info.subheader(j_nom)
-            col_info.write(f"**{j_club}** | Propiedad: {j_pct}%")
+            col_info.write(f"**{j_club}** | {j_pct}%")
             col_info.caption(f"Costo: €{formatear_monto(j_costo)}")
             
-            pts_365 = col_input.number_input(f"Score 365 ({j_nom})", 1.0, 10.0, 6.4, step=0.1, key=f"pts_{j_id}")
+            # Key dinámica para resetear el input y el botón
+            v_key = f"{st.session_state.version}_{j_id}"
+            
+            pts_365 = col_input.number_input(f"Score 365", 1.0, 10.0, 6.4, step=0.1, key=f"pts_{v_key}")
             balance = calcular_balance_fecha(pts_365, j_costo)
             
             color_bal = "green" if pts_365 >= 6.6 else "red" if pts_365 <= 6.3 else "gray"
             col_input.markdown(f"Resultado: :{color_bal}[€{formatear_monto(balance)}]")
             
             with col_ops:
-                confirmar = st.checkbox("Confirmar acción", key=f"conf_{j_id}")
-                c_btn1, c_btn2 = st.columns(2)
+                # Al cambiar v_key, el checkbox vuelve a False siempre
+                confirmar = st.checkbox("Confirmar acción", key=f"conf_{v_key}")
                 
-                # BOTÓN REESTILIZADO: CARGAR RENDIMIENTO
-                if c_btn1.button("CARGAR RENDIMIENTO", key=f"proc_{j_id}", disabled=not confirmar, use_container_width=True, type="primary"):
+                if st.button("CARGAR RENDIMIENTO", key=f"btn_p_{v_key}", disabled=not confirmar, use_container_width=True, type="primary"):
                     cambio_prestigio = 1 if pts_365 >= 7.0 else -1 if pts_365 <= 5.5 else 0
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
                                 (balance, cambio_prestigio, u_id), commit=True)
-                    st.rerun() # El rerun resetea el checkbox y el botón
+                    st.session_state.version += 1 # Esto mata el estado anterior y apaga el botón
+                    st.rerun()
 
-                if c_btn2.button("VENDER", key=f"vend_{j_id}", disabled=not confirmar, use_container_width=True):
+                if st.button("VENDER", key=f"btn_v_{v_key}", disabled=not confirmar, use_container_width=True):
                     recupero = j_costo * 0.98
                     ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (recupero, u_id), commit=True)
+                    st.session_state.version += 1
                     st.rerun()
 
 # Reset Total
 if st.sidebar.button("Resetear Todo"):
     ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
     ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
+    st.session_state.version += 1
     st.rerun()
