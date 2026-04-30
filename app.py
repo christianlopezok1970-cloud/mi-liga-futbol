@@ -150,7 +150,7 @@ def formatear_monto(valor):
         return f"{int(valor / 1000)} K"
     return str(int(valor))
 
-# --- 6. MERCADO DE PASES CON MONTOS REDUCIDOS ---
+# --- 6. MERCADO DE PASES CON ORDEN CORREGIDO ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
     if df_mercado is not None:
         # Fila de filtros
@@ -173,14 +173,14 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
         ]
 
         if not df_filtrado.empty:
-            # Formato solicitado: Costo (reducido) / Nombre / Posición / Equipo
+            # ORDEN SOLICITADO: Nombre / Monto / Posición / Equipo
             opciones_busqueda = df_filtrado.apply(
-                lambda x: f"{formatear_monto(x['Precio'])}/ {x['Nombre']}/ {x['Posicion']}/ {x['Club']}", axis=1
+                lambda x: f"{x['Nombre']}/ {formatear_monto(x['Precio'])}/ {x['Posicion']}/ {x['Club']}", axis=1
             ).tolist()
             
             seleccion_previa = st.selectbox("Seleccionar jugador:", options=opciones_busqueda, key=f"sel_{st.session_state.version}")
             
-            # Obtener datos
+            # Obtener datos del seleccionado
             indice = opciones_busqueda.index(seleccion_previa)
             j_info = df_filtrado.iloc[indice]
             
@@ -198,7 +198,7 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
             if st.button("CONFIRMAR FICHAJE", use_container_width=True, type="primary"):
                 c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
                 if c.fetchone()[0] >= 1:
-                    st.error("Ya tienes un jugador.")
+                    st.error("Ya tienes un jugador. Debes venderlo primero.")
                 else:
                     if presupuesto < int(j_info['Precio']):
                         st.error("Presupuesto insuficiente.")
@@ -211,7 +211,7 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
                         forzar_limpieza() 
                         st.rerun()
         else:
-            st.warning("No hay resultados.")
+            st.warning("No se encontraron jugadores con esos filtros.")
 # --- 7. GESTIÓN DEL JUGADOR ---
 st.divider()
 st.markdown("### 📋 Gestión del Jugador")
