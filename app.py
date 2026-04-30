@@ -121,7 +121,6 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
 
 # --- 6. GESTIÓN DEL JUGADOR ---
 st.divider()
-# TÍTULO DE SECCIÓN REDUCIDO Y CAMBIADO
 st.markdown("### 📋 Gestión del Jugador")
 
 c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario_id = ? ORDER BY posicion ASC", (user_id,))
@@ -131,17 +130,44 @@ if not plantel:
     st.info("Sin jugador asignado. Ve al mercado.")
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
-        with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
-            st.write(f"**Valor:** €{int(j_val):,}")
-            st.write(f"**Sueldo x partido (1.25%):** €{int(j_val * PORCENTAJE_SUELDO):,}")
+        # El expander ahora tiene un título más limpio
+        with st.expander(f"VER DETALLES DE {j_nom.upper()}", expanded=True):
+            
+            # --- CABECERA RESALTADA DEL JUGADOR ---
+            st.markdown(f"""
+                <div style="background-color: #262730; padding: 15px; border-radius: 10px; border-left: 5px solid {color_numero}; margin-bottom: 20px;">
+                    <p style="color: {color_numero}; font-size: 14px; margin: 0; font-weight: bold; text-transform: uppercase;">{j_pos} | {j_club}</p>
+                    <h2 style="margin: 0; font-size: 38px; font-weight: 800; color: white; letter-spacing: -1px;">{j_nom}</h2>
+                </div>
+            """, unsafe_allow_html=True)
+
+            # --- INFORMACIÓN FINANCIERA ---
+            col_info1, col_info2 = st.columns(2)
+            with col_info1:
+                st.write(f"**Valor de Mercado:**")
+                st.subheader(f"€{int(j_val):,}")
+            with col_info2:
+                st.write(f"**Sueldo x Partido:**")
+                st.subheader(f"€{int(j_val * PORCENTAJE_SUELDO):,}")
+            
+            st.divider()
+
+            # --- ENTRADA DE PUNTOS Y BALANCES ---
             pts = st.number_input("Puntaje de la fecha:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             neto = calcular_resultado_neto(pts, j_val)
             ajuste_p = calcular_ajuste_prestigio(pts)
-            st.write(f"💰 Balance Dinero: **{'+' if neto >= 0 else ''}€{neto:,}**")
-            st.write(f"⭐ Impacto Prestigio: **{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts**")
             
-            col1, col2 = st.columns(2)
-            if col1.button("✅ Procesar Fecha", key=f"a_{j_id}"):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("💰 Balance Dinero", f"{'+' if neto >= 0 else ''}€{neto:,}", delta=neto)
+            with c2:
+                st.metric("⭐ Impacto Prestigio", f"{ajuste_p} pts", delta=ajuste_p)
+            
+            st.write("") # Espaciador
+            
+            # --- BOTONES DE ACCIÓN ---
+            col_btn1, col_btn2 = st.columns(2)
+            if col_btn1.button("✅ PROCESAR FECHA", key=f"a_{j_id}", use_container_width=True):
                 if (presupuesto + neto) < 0:
                     st.error("Saldo insuficiente.")
                 else:
@@ -149,15 +175,15 @@ else:
                     c.execute("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", (neto, nuevo_p, user_id))
                     conn.commit()
                     st.rerun()
-            with col2:
+            
+            with col_btn2:
                 monto_v = j_val - (j_val * PORCENTAJE_SUELDO)
-                conf = st.checkbox(f"Vender por €{int(monto_v):,}", key=f"c_{j_id}")
-                if st.button("🗑️ Vender", key=f"v_{j_id}", disabled=not conf, type="primary"):
+                conf = st.checkbox(f"Confirmar venta (€{int(monto_v):,})", key=f"c_{j_id}")
+                if st.button("🗑️ VENDER JUGADOR", key=f"v_{j_id}", disabled=not conf, type="primary", use_container_width=True):
                     c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
                     c.execute("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_v, user_id))
                     conn.commit()
                     st.rerun()
-
 # --- 7. REINICIO ---
 st.sidebar.divider()
 if st.sidebar.button("🚨 Reiniciar Carrera"):
