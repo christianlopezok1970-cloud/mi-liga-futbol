@@ -133,14 +133,14 @@ else:
         # Volvemos al formato anterior del expander: nombre más notorio por el texto en mayúsculas
         with st.expander(f"{j_pos} | {j_nom.upper()} ({j_club})", expanded=True):
             st.write(f"**Valor:** €{int(j_val):,}")
-            st.write(f"**Sueldo x partido (1.25%):** €{int(j_val * PORCENTAJE_SUELDO):,}")
+            st.write(f"**Sueldo x partido:** €{int(j_val * PORCENTAJE_SUELDO):,}")
             
             pts = st.number_input("Puntaje de la fecha:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             neto = calcular_resultado_neto(pts, j_val)
             ajuste_p = calcular_ajuste_prestigio(pts)
             
-            st.write(f"💰 Balance Dinero: **{'+' if neto >= 0 else ''}€{neto:,}**")
-            st.write(f"⭐ Impacto Prestigio: **{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts**")
+            st.write(f"💰 Balance: **{'+' if neto >= 0 else ''}€{neto:,}**")
+            st.write(f"⭐ Prestigio: **{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts**")
             
             col1, col2 = st.columns(2)
             if col1.button("✅ Procesar Fecha", key=f"a_{j_id}"):
