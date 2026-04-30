@@ -145,24 +145,26 @@ with st.sidebar.expander("⚙️ Administrar Usuarios"):
 # --- 6. MERCADO DE PASES ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
     if df_mercado is not None:
-        # 1. Creamos una lista simplificada para el buscador
+        # 1. Lista simplificada para el buscador
         nombres_jugadores = df_mercado['Nombre'].tolist()
         clubes_jugadores = df_mercado['Club'].tolist()
         opciones_busqueda = [f"{n} ({c})" for n, c in zip(nombres_jugadores, clubes_jugadores)]
         
-        # 2. El buscador solo muestra Nombre y Club
+        # 2. Buscador
         seleccion_previa = st.selectbox("Seleccionar jugador para ver detalles:", options=opciones_busqueda)
         
-        # 3. Obtenemos los datos completos del jugador seleccionado
+        # 3. Datos del seleccionado
         indice = opciones_busqueda.index(seleccion_previa)
         j_info = df_mercado.iloc[indice]
         
-        # 4. Mostramos una "Ficha de Contrato" clara y visible
+        # 4. Ficha de Contrato con jerarquía invertida y colores blancos
         st.markdown(f"""
-            <div style="background-color: #1E1E1E; padding: 15px; border-radius: 10px; border: 1px solid #333; margin-top: 10px;">
-                <h4 style="margin: 0; color: white;">{j_info['Nombre']}</h4>
-                <p style="margin: 5px 0; color: #888;">{j_info['Club']} | {j_info['Posicion']}</p>
-                <h3 style="margin: 0; color: #FFA500;">Precio: €{int(j_info['Precio']):,}</h3>
+            <div style="background-color: #1E1E1E; padding: 20px; border-radius: 10px; border: 1px solid #333; margin-top: 10px; text-align: center;">
+                <p style="margin: 0; color: #FFFFFF; font-size: 14px; opacity: 0.8; text-transform: uppercase; letter-spacing: 1px;">{j_info['Nombre']}</p>
+                <h2 style="margin: 5px 0; color: #FFFFFF; font-weight: 800; font-size: 28px;">{j_info['Club']}</h2>
+                <h4 style="margin: 0; color: #FFFFFF; font-weight: 400; font-size: 20px; opacity: 0.9;">{j_info['Posicion']}</h4>
+                <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
+                <p style="margin: 0; color: #FFFFFF; font-size: 16px; font-weight: 300;">Precio: €{int(j_info['Precio']):,}</p>
             </div>
         """, unsafe_allow_html=True)
         
@@ -181,7 +183,7 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
                               (user_id, j_info['Nombre'], int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
                     c.execute("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (int(j_info['Precio']), user_id))
                     conn.commit()
-                    st.success(f"¡{j_info['Nombre']} ha firmado su contrato!")
+                    st.success(f"¡{j_info['Nombre']} ha firmado con {j_info['Club']}!")
                     st.rerun()
 
 # --- 7. GESTIÓN DEL JUGADOR ---
