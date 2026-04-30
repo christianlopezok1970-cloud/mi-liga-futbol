@@ -80,7 +80,7 @@ conn.commit()
 c.execute("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto, prestigio = c.fetchone()
 
-# Lógica de Colores Prestigio (Fondo Negro)
+# Lógica de Colores Prestigio
 color_numero = "#FF0000"
 if prestigio >= 90: color_numero = "#40E0D0"
 elif prestigio >= 80: color_numero = "#00FF00"
@@ -97,6 +97,23 @@ st.sidebar.markdown(f"""
 st.sidebar.divider()
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
+# --- NUEVA SECCIÓN: PRÉSTAMO ---
+with st.sidebar.expander("💰 Solicitar Préstamo"):
+    st.write("Recibe **€1,000,000** inmediatos.")
+    st.write("⚠️ Costo: **-5 puntos** de prestigio.")
+    
+    conf_prestamo = st.checkbox("Confirmar condiciones")
+    if st.button("PEDIR PRÉSTAMO", disabled=not conf_prestamo, use_container_width=True):
+        nuevo_presupuesto = presupuesto + 1000000
+        nuevo_prestigio = max(1, prestigio - 5)
+        
+        c.execute("UPDATE usuarios SET presupuesto = ?, prestigio = ? WHERE id = ?", 
+                  (nuevo_presupuesto, nuevo_prestigio, user_id))
+        conn.commit()
+        st.success("¡Préstamo otorgado!")
+        st.rerun()
+
+st.sidebar.divider()
 # --- 5. MERCADO ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
     if df_mercado is not None:
