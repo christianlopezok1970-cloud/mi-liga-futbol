@@ -2,7 +2,7 @@ import streamlit as st
 import sqlite3
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v11.db'
+DB_NAME = 'agencia_global_v13.db'
 
 def ejecutar_db(query, params=(), commit=False):
     with sqlite3.connect(DB_NAME, check_same_thread=False) as conn:
@@ -45,7 +45,6 @@ st.set_page_config(page_title="World Transfer Market", layout="wide")
 if 'version' not in st.session_state:
     st.session_state.version = 0
 
-# TÍTULO PRINCIPAL (H3)
 st.subheader("🌎 World Transfer Market")
 
 manager = st.sidebar.text_input("Nombre del Agente:").strip()
@@ -104,7 +103,6 @@ with st.expander("🔍 Scouting Global"):
         st.rerun()
 
 # --- 5. PANEL DE ACTIVOS ---
-# TÍTULO REDUCIDO (H5) Y RENOMBRADO
 st.markdown("##### 📋 Jugadores Representados")
 
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club, liga FROM cartera WHERE usuario_id = ?", (u_id,))
@@ -128,6 +126,14 @@ else:
             
             with col_ops:
                 confirmar = st.checkbox("Confirmar", key=f"conf_{v_key}")
+                
+                # --- ACTUALIZADO AL 1% ---
+                perdida_venta = j_costo * 0.01
+                recupero = j_costo - perdida_venta
+                
+                if confirmar:
+                    st.error(f"⚠️ Al vender pierdes €{formatear_monto(perdida_venta)} (1% de gastos).")
+
                 if st.button("CARGAR RENDIMIENTO", key=f"btn_p_{v_key}", disabled=not confirmar, use_container_width=True, type="primary"):
                     cambio_rep = 1 if pts_365 >= 7.0 else -1 if pts_365 <= 5.5 else 0
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
@@ -135,8 +141,7 @@ else:
                     st.session_state.version += 1
                     st.rerun()
 
-                if st.button("VENDER", key=f"btn_v_{v_key}", disabled=not confirmar, use_container_width=True):
-                    recupero = j_costo * 0.98
+                if st.button(f"VENDER (Recibes €{formatear_monto(recupero)})", key=f"btn_v_{v_key}", disabled=not confirmar, use_container_width=True):
                     ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (recupero, u_id), commit=True)
                     st.session_state.version += 1
