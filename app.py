@@ -183,3 +183,32 @@ with st.sidebar.expander("Reiniciar Carrera"):
         conn.commit()
         forzar_limpieza()
         st.rerun()
+
+# --- 9. RANKING DE MANAGERS (SALÓN DE LA FAMA) ---
+st.sidebar.divider()
+st.sidebar.subheader("🏆 Top 5 Managers")
+
+# Consulta para obtener a los mejores
+# Ordenamos por Prestigio (DESC) y luego por Presupuesto (DESC)
+c.execute("""
+    SELECT nombre, prestigio, presupuesto 
+    FROM usuarios 
+    ORDER BY prestigio DESC, presupuesto DESC 
+    LIMIT 5
+""")
+ranking = c.fetchall()
+
+# Crear una tabla visualmente atractiva en la sidebar
+if ranking:
+    for i, (nom, pres, plata) in enumerate(ranking, 1):
+        # Emoji especial para el podio
+        medalla = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "👤"
+        
+        # Formato de cada fila del ranking
+        st.sidebar.markdown(f"""
+            **{medalla} {i}. {nom}**  
+            ⭐ `{pres} pts` | 💰 `€{int(plata):,}`
+            ---
+        """)
+else:
+    st.sidebar.info("Aún no hay managers en el ranking.")
