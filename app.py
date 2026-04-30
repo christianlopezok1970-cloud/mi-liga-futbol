@@ -111,7 +111,7 @@ else:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
             # Información Financiera
             st.write(f"**Valor de Fichaje:** €{int(j_val):,}")
-            st.write(f"**Costo de Sueldo (1.25%):** €{int(j_val * PORCENTAJE_SUELDO):,}")
+            st.write(f"**Sueldo x Partido:** €{int(j_val * PORCENTAJE_SUELDO):,}")
             
             # Entrada de puntos
             pts = st.number_input("Puntaje obtenido:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
