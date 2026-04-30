@@ -45,11 +45,10 @@ def cargar_mercado_oficial(url):
 
 df_mercado = cargar_mercado_oficial(SHEET_CSV_URL)
 
-# --- 3. LÓGICA DE NEGOCIO ACTUALIZADA ---
-VALOR_POR_PASO = 20000 # Valor fijo por cada 0.1 de puntaje
+# --- 3. LÓGICA DE NEGOCIO ---
+VALOR_POR_PASO = 20000 
 
 def calcular_nuevo_valor_fijo(valor_actual, puntaje):
-    # Cada 0.1 de diferencia con 6.4 son +/- 20.000
     pasos = (puntaje - 6.4) / 0.1
     variacion = pasos * VALOR_POR_PASO
     return int(max(0, valor_actual + variacion))
@@ -68,7 +67,8 @@ if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
-PRESUPUESTO_INICIAL = 30000000
+# --- NUEVO PRESUPUESTO: 2.000.000 ---
+PRESUPUESTO_INICIAL = 2000000
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto) VALUES (?, ?)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
 c.execute("SELECT id, presupuesto FROM usuarios WHERE nombre = ?", (user_name,))
@@ -90,10 +90,10 @@ if st.sidebar.button("💸 Pagar Sueldos (0.1%)"):
         st.sidebar.warning(f"Sueldos pagados: -€{int(total_sueldos):,}")
         st.rerun()
     else:
-        st.sidebar.info("No tienes jugadores para pagar sueldos.")
+        st.sidebar.info("No tienes jugadores.")
 
-# --- 5. MERCADO DE PASES ---
-with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
+# --- 5. MERCADO DE PASES (LIMITE 1 JUGADOR) ---
+with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
     if not MERCADO_ABIERTO:
         st.warning("Mercado cerrado.")
     elif df_mercado is not None:
@@ -104,39 +104,36 @@ with st.expander("🛒 Mercado de Pases (Cupo: 25 jugadores)"):
             idx = opciones.index(seleccion)
             j_info = df_mercado.iloc[idx]
             
-            c.execute("SELECT id FROM jugadores WHERE usuario_id = ? AND nombre = ? AND club = ?", 
-                      (user_id, j_info['Nombre'], j_info['Club']))
-            if c.fetchone():
-                st.error("Ya tienes a este jugador.")
+            c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
+            total_actual = c.fetchone()[0]
+            
+            # NUEVO LÍMITE: 1
+            if total_actual >= 1:
+                st.error("Ya tienes 1 jugador. Véndelo para comprar otro.")
+            elif presupuesto < int(j_info['Precio']):
+                st.error("Dinero insuficiente.")
             else:
-                c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
-                if c.fetchone()[0] >= 25:
-                    st.error("Plantilla llena.")
-                elif presupuesto < int(j_info['Precio']):
-                    st.error("Dinero insuficiente.")
-                else:
-                    c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion, club) VALUES (?,?,?,?,?,?)",
-                              (user_id, j_info['Nombre'], int(j_info['Precio']), int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
-                    c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - int(j_info['Precio']), user_id))
-                    conn.commit()
-                    st.rerun()
+                c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, valor_anterior, posicion, club) VALUES (?,?,?,?,?,?)",
+                          (user_id, j_info['Nombre'], int(j_info['Precio']), int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
+                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - int(j_info['Precio']), user_id))
+                conn.commit()
+                st.success("Fichaje exitoso!")
+                st.rerun()
 
-# --- 6. GESTIÓN DE PLANTEL ÚNICO ---
+# --- 6. GESTIÓN DE PLANTEL ---
 st.divider()
-st.header("📋 Tu Plantel")
+st.header("📋 Tu Jugador")
 
-c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario_id = ? ORDER BY posicion ASC", (user_id,))
+c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario_id = ?", (user_id,))
 plantel = c.fetchall()
 
 if not plantel:
-    st.info("Tu plantel está vacío. Ve al Mercado de Pases.")
+    st.info("No tienes ningún jugador en tu equipo.")
 else:
-    # Mostrar en columnas para que no sea una lista infinita
-    cols = st.columns(2)
-    for i, (j_id, j_nom, j_val, j_pos, j_club) in enumerate(plantel):
-        with cols[i % 2].expander(f"{j_pos} | {j_nom} ({j_club})"):
-            st.write(f"**Valor Actual: €{int(j_val):, }**")
-            st.write(f"Sueldo estimado (0.1%): €{int(j_val * 0.001):,}")
+    for j_id, j_nom, j_val, j_pos, j_club in plantel:
+        with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
+            st.write(f"**Valor Actual: €{int(j_val):,}**")
+            st.write(f"Sueldo (0.1%): €{int(j_val * 0.001):,}")
             
             pts = st.number_input("Puntos obtenidos", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             
