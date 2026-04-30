@@ -6,8 +6,17 @@ import re
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
 conn = sqlite3.connect('liga_futbol.db', check_same_thread=False)
 c = conn.cursor()
-# Se agregó la columna prestigio con valor inicial 40
-c.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER DEFAULT 40)')
+
+# CREACIÓN / ACTUALIZACIÓN DE TABLAS
+c.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL)')
+
+# Truco para agregar la columna prestigio si no existe sin borrar datos
+try:
+    c.execute('ALTER TABLE usuarios ADD COLUMN prestigio INTEGER DEFAULT 40')
+except sqlite3.OperationalError:
+    # Si ya existe, no hace nada
+    pass
+
 c.execute('''CREATE TABLE IF NOT EXISTS jugadores 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre TEXT, 
               valor REAL, posicion TEXT, club TEXT,
@@ -74,35 +83,40 @@ if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
-# Presupuesto y Prestigio Inicial
+# Configuración Inicial
 PRESUPUESTO_INICIAL = 2000000
 PRESTIGIO_INICIAL = 40
 
+# INSERTAMOS SI NO EXISTE
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto, prestigio) VALUES (?, ?, ?)", 
           (user_name, PRESUPUESTO_INICIAL, PRESTIGIO_INICIAL))
 conn.commit()
 
+# CARGAMOS DATOS ACTUALES
 c.execute("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto, prestigio = c.fetchone()
 
-# Mostrar Prestigio con Color
-color_prestigio = "#FF0000" # Rojo por defecto
-if prestigio >= 90: color_prestigio = "#40E0D0" # Turquesa
-elif prestigio >= 80: color_prestigio = "#008000" # Verde
-elif prestigio >= 60: color_prestigio = "#FFFF00" # Amarillo (texto negro)
-elif prestigio >= 40: color_prestigio = "#FFA500" # Naranja
+# Estilo de Prestigio
+color_p = "#FF0000" # Rojo
+texto_negro = False
+if prestigio >= 90: color_p = "#40E0D0" # Turquesa
+elif prestigio >= 80: color_p = "#008000" # Verde
+elif prestigio >= 60: 
+    color_p = "#FFFF00" # Amarillo
+    texto_negro = True
+elif prestigio >= 40: color_p = "#FFA500" # Naranja
 
 st.sidebar.markdown(f"""
-    <div style="background-color:{color_prestigio}; padding:10px; border-radius:10px; text-align:center;">
-        <h2 style="color: {'black' if prestigio >= 60 and prestigio < 80 else 'white'}; margin:0;">⭐ {prestigio}</h2>
-        <p style="color: {'black' if prestigio >= 60 and prestigio < 80 else 'white'}; margin:0; font-weight:bold;">PRESTIGIO</p>
+    <div style="background-color:{color_p}; padding:15px; border-radius:10px; text-align:center; border: 2px solid rgba(0,0,0,0.1);">
+        <h2 style="color: {'black' if texto_negro else 'white'}; margin:0; font-family:sans-serif;">{prestigio}</h2>
+        <p style="color: {'black' if texto_negro else 'white'}; margin:0; font-weight:bold; letter-spacing: 1px;">PRESTIGIO</p>
     </div>
     """, unsafe_allow_html=True)
 
 st.sidebar.divider()
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
-# --- 5. MERCADO DE PASES ---
+# --- 5. MERCADO ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
     if df_mercado is not None:
         opciones = df_mercado.apply(lambda x: f"{x['Nombre']} ({x['Club']}) - {x['Posicion']} - €{int(x['Precio']):,}", axis=1).tolist()
@@ -111,18 +125,19 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
         if st.button("Confirmar Fichaje"):
             c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
             if c.fetchone()[0] >= 1:
-                st.error("Ya tienes un jugador.")
-            elif presupuesto < int(df_mercado.iloc[opciones.index(seleccion)]['Precio']):
-                st.error("Fondos insuficientes.")
+                st.error("Ya tienes un jugador. Véndelo primero.")
             else:
                 j_info = df_mercado.iloc[opciones.index(seleccion)]
-                c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion, club) VALUES (?,?,?,?,?)",
-                          (user_id, j_info['Nombre'], int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
-                c.execute("UPDATE usuarios SET presupuesto = ? WHERE id = ?", (presupuesto - int(j_info['Precio']), user_id))
-                conn.commit()
-                st.rerun()
+                if presupuesto < int(j_info['Precio']):
+                    st.error("Dinero insuficiente.")
+                else:
+                    c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion, club) VALUES (?,?,?,?,?)",
+                              (user_id, j_info['Nombre'], int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
+                    c.execute("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (int(j_info['Precio']), user_id))
+                    conn.commit()
+                    st.rerun()
 
-# --- 6. GESTIÓN DE PLANTEL ---
+# --- 6. PLANTEL ---
 st.divider()
 st.header("📋 Gestión de Avatar")
 
@@ -130,7 +145,7 @@ c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario
 plantel = c.fetchall()
 
 if not plantel:
-    st.info("Sin jugador asignado.")
+    st.info("Sin jugador asignado. Ve al mercado.")
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
         with st.expander(f"{j_pos} | {j_nom} ({j_club})", expanded=True):
@@ -138,7 +153,6 @@ else:
             st.write(f"**Sueldo x partido (1.25%):** €{int(j_val * PORCENTAJE_SUELDO):,}")
             
             pts = st.number_input("Puntaje de la fecha:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
-            
             neto = calcular_resultado_neto(pts, j_val)
             ajuste_p = calcular_ajuste_prestigio(pts)
             
@@ -146,10 +160,9 @@ else:
             st.write(f"⭐ Impacto Prestigio: **{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts**")
             
             col1, col2 = st.columns(2)
-            
             if col1.button("✅ Procesar Fecha", key=f"a_{j_id}"):
                 if (presupuesto + neto) < 0:
-                    st.error("No puedes pagar el sueldo.")
+                    st.error("Saldo insuficiente.")
                 else:
                     nuevo_p = max(1, min(100, prestigio + ajuste_p))
                     c.execute("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", 
@@ -159,8 +172,8 @@ else:
                 
             with col2:
                 monto_v = j_val - (j_val * PORCENTAJE_SUELDO)
-                confirmar = st.checkbox(f"Confirmar venta (€{int(monto_v):,})", key=f"c_{j_id}")
-                if st.button("🗑️ Vender", key=f"v_{j_id}", disabled=not confirmar, type="primary"):
+                conf = st.checkbox(f"Vender por €{int(monto_v):,}", key=f"c_{j_id}")
+                if st.button("🗑️ Vender", key=f"v_{j_id}", disabled=not conf, type="primary"):
                     c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
                     c.execute("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_v, user_id))
                     conn.commit()
