@@ -65,8 +65,6 @@ def calcular_ajuste_prestigio(pts):
 
 # --- 4. INTERFAZ ---
 st.set_page_config(page_title="Liga Argentina Manager", layout="wide")
-
-# Título reducido a la mitad (##)
 st.markdown("## ⚽ Liga Argentina Manager")
 
 user_name = st.sidebar.text_input("Usuario").strip()
@@ -82,7 +80,7 @@ conn.commit()
 c.execute("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto, prestigio = c.fetchone()
 
-# Lógica de Colores para el prestigio (Número en color, Fondo negro)
+# Lógica de Colores Prestigio (Fondo Negro)
 color_numero = "#FF0000"
 if prestigio >= 90: color_numero = "#40E0D0"
 elif prestigio >= 80: color_numero = "#00FF00"
@@ -131,26 +129,21 @@ if not plantel:
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
         with st.expander(f"{j_pos} | {j_nom.upper()} ({j_club})", expanded=True):
-            
             # Montos fijos en Amarillo
             st.write(f"**Valor:** :orange[€{int(j_val):,}]")
             st.write(f"**Sueldo x partido:** :orange[€{int(j_val * PORCENTAJE_SUELDO):,}]")
             
-            # Entrada de puntos
             pts = st.number_input("Puntaje de la fecha:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             neto = calcular_resultado_neto(pts, j_val)
             ajuste_p = calcular_ajuste_prestigio(pts)
             
-            # Colores dinámicos para Balance y Prestigio
+            # Balances dinámicos (Verde/Rojo)
             color_neto = "green" if neto >= 0 else "red"
             color_prestigio_pts = "green" if ajuste_p >= 0 else "red"
-            
             st.markdown(f"**Balance:** :{color_neto}[{'+' if neto >= 0 else ''}€{neto:,}]")
             st.markdown(f"**Prestigio:** :{color_prestigio_pts}[{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts]")
             
-            # --- ZONA DE ACCIONES CRÍTICAS ---
             st.divider() 
-            
             col_vender, col_procesar = st.columns(2)
             
             with col_vender:
@@ -166,20 +159,28 @@ else:
             with col_procesar:
                 st.write("🚀 **Acción Principal**")
                 conf_p = st.checkbox("Confirmar resultados de la fecha", key=f"c_p_{j_id}")
-                
                 if st.button("✅ PROCESAR FECHA", key=f"a_{j_id}", disabled=not conf_p, type="primary", use_container_width=True):
                     if (presupuesto + neto) < 0:
-                        st.error("Saldo insuficiente para pagar el sueldo.")
+                        st.error("Saldo insuficiente.")
                     else:
                         nuevo_p = max(1, min(100, prestigio + ajuste_p))
                         c.execute("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", (neto, nuevo_p, user_id))
                         conn.commit()
                         st.rerun()
 
-# --- 7. REINICIO ---
+# --- 7. REINICIO CON MÁXIMA SEGURIDAD ---
 st.sidebar.divider()
-if st.sidebar.button("🚨 Reiniciar Carrera"):
-    c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
-    c.execute("UPDATE usuarios SET presupuesto = ?, prestigio = ? WHERE id = ?", (PRESUPUESTO_INICIAL, PRESTIGIO_INICIAL, user_id))
-    conn.commit()
-    st.rerun()
+with st.sidebar.expander("🚨 Zona de Peligro: Reiniciar"):
+    st.warning("Esto borrará todo tu progreso de forma permanente.")
+    conf_armado = st.checkbox("Desbloquear botón de reinicio")
+    input_borrar = st.text_input("Escribe REINICIAR para confirmar:")
+    
+    if st.button("REINICIAR CARRERA", 
+                 type="primary", 
+                 disabled=not (conf_armado and input_borrar == "REINICIAR"),
+                 use_container_width=True):
+        c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
+        c.execute("UPDATE usuarios SET presupuesto = ?, prestigio = ? WHERE id = ?", (PRESUPUESTO_INICIAL, PRESTIGIO_INICIAL, user_id))
+        conn.commit()
+        st.rerun()
+                     
