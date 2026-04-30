@@ -121,7 +121,7 @@ with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
 
 # --- 6. GESTIÓN DEL JUGADOR ---
 st.divider()
-st.markdown("### 📋 Gestión del Jugador") # Título de sección reducido a la mitad
+st.markdown("### 📋 Gestión del Jugador")
 
 c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario_id = ? ORDER BY posicion ASC", (user_id,))
 plantel = c.fetchall()
@@ -130,35 +130,51 @@ if not plantel:
     st.info("Sin jugador asignado. Ve al mercado.")
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
-        # Volvemos al formato anterior del expander: nombre más notorio por el texto en mayúsculas
         with st.expander(f"{j_pos} | {j_nom.upper()} ({j_club})", expanded=True):
-            st.write(f"**Valor:** €{int(j_val):,}")
-            st.write(f"**Sueldo x partido:** €{int(j_val * PORCENTAJE_SUELDO):,}")
             
+            # Montos fijos en Amarillo
+            st.write(f"**Valor:** :orange[€{int(j_val):,}]")
+            st.write(f"**Sueldo x partido:** :orange[€{int(j_val * PORCENTAJE_SUELDO):,}]")
+            
+            # Entrada de puntos
             pts = st.number_input("Puntaje de la fecha:", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
             neto = calcular_resultado_neto(pts, j_val)
             ajuste_p = calcular_ajuste_prestigio(pts)
             
-            st.write(f"💰 Balance: **{'+' if neto >= 0 else ''}€{neto:,}**")
-            st.write(f"⭐ Prestigio: **{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts**")
+            # Colores dinámicos para Balance y Prestigio
+            color_neto = "green" if neto >= 0 else "red"
+            color_prestigio_pts = "green" if ajuste_p >= 0 else "red"
             
-            col1, col2 = st.columns(2)
-            if col1.button("✅ Procesar Fecha", key=f"a_{j_id}"):
-                if (presupuesto + neto) < 0:
-                    st.error("Saldo insuficiente.")
-                else:
-                    nuevo_p = max(1, min(100, prestigio + ajuste_p))
-                    c.execute("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", (neto, nuevo_p, user_id))
-                    conn.commit()
-                    st.rerun()
-            with col2:
+            st.markdown(f"**Balance:** :{color_neto}[{'+' if neto >= 0 else ''}€{neto:,}]")
+            st.markdown(f"**Prestigio:** :{color_prestigio_pts}[{'+' if ajuste_p >= 0 else ''}{ajuste_p} pts]")
+            
+            # --- ZONA DE ACCIONES CRÍTICAS ---
+            st.divider() 
+            
+            col_vender, col_procesar = st.columns(2)
+            
+            with col_vender:
+                st.write("⚠️ **Zona de Venta**")
                 monto_v = j_val - (j_val * PORCENTAJE_SUELDO)
-                conf = st.checkbox(f"Vender por €{int(monto_v):,}", key=f"c_{j_id}")
-                if st.button("🗑️ Vender", key=f"v_{j_id}", disabled=not conf, type="primary"):
+                conf_v = st.checkbox(f"Confirmar venta (€{int(monto_v):,})", key=f"c_v_{j_id}")
+                if st.button("🗑️ Vender Jugador", key=f"v_{j_id}", disabled=not conf_v, use_container_width=True):
                     c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
                     c.execute("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_v, user_id))
                     conn.commit()
                     st.rerun()
+
+            with col_procesar:
+                st.write("🚀 **Acción Principal**")
+                conf_p = st.checkbox("Confirmar resultados de la fecha", key=f"c_p_{j_id}")
+                
+                if st.button("✅ PROCESAR FECHA", key=f"a_{j_id}", disabled=not conf_p, type="primary", use_container_width=True):
+                    if (presupuesto + neto) < 0:
+                        st.error("Saldo insuficiente para pagar el sueldo.")
+                    else:
+                        nuevo_p = max(1, min(100, prestigio + ajuste_p))
+                        c.execute("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", (neto, nuevo_p, user_id))
+                        conn.commit()
+                        st.rerun()
 
 # --- 7. REINICIO ---
 st.sidebar.divider()
