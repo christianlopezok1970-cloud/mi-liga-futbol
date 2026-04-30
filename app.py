@@ -73,7 +73,6 @@ st.markdown("## ⚽ Liga Argentina Manager")
 user_name = st.sidebar.text_input("Usuario").strip()
 if not user_name:
     st.info("👋 Ingresa tu nombre para comenzar.")
-    # --- MOSTRAR RANKING INCLUSO SIN LOGIN ---
     st.sidebar.divider()
     st.sidebar.subheader("🏆 Top Managers")
     c.execute("SELECT nombre, prestigio FROM usuarios ORDER BY prestigio DESC LIMIT 5")
@@ -133,9 +132,7 @@ with st.sidebar.expander("⚙️ Administrar Usuarios"):
     conf_borrar = st.checkbox(f"Confirmar eliminar a {usuario_a_borrar}", key=f"del_{st.session_state.version}")
     
     if st.button("ELIMINAR USUARIO DEFINITIVAMENTE", disabled=not conf_borrar, type="primary", use_container_width=True):
-        # Primero borramos sus jugadores por la integridad de la base de datos
         c.execute("DELETE FROM jugadores WHERE usuario_id = (SELECT id FROM usuarios WHERE nombre = ?)", (usuario_a_borrar,))
-        # Luego borramos al usuario
         c.execute("DELETE FROM usuarios WHERE nombre = ?", (usuario_a_borrar,))
         conn.commit()
         st.success(f"Usuario {usuario_a_borrar} eliminado.")
