@@ -142,47 +142,67 @@ with st.sidebar.expander("⚙️ Administrar Usuarios"):
         forzar_limpieza()
         st.rerun()
 
-# --- 6. MERCADO DE PASES ---
+# --- 6. MERCADO DE PASES CON FILTROS ---
 with st.expander("🛒 Mercado de Pases (Cupo: 1 jugador)"):
     if df_mercado is not None:
-        # 1. Lista simplificada para el buscador
-        nombres_jugadores = df_mercado['Nombre'].tolist()
-        clubes_jugadores = df_mercado['Club'].tolist()
-        opciones_busqueda = [f"{n} ({c})" for n, c in zip(nombres_jugadores, clubes_jugadores)]
+        col_f1, col_f2 = st.columns(2)
         
-        # 2. Buscador
-        seleccion_previa = st.selectbox("Seleccionar jugador para ver detalles:", options=opciones_busqueda)
+        with col_f1:
+            busqueda_nombre = st.text_input("🔍 Buscar por nombre:", placeholder="Ej: Messi")
         
-        # 3. Datos del seleccionado
-        indice = opciones_busqueda.index(seleccion_previa)
-        j_info = df_mercado.iloc[indice]
-        
-        # 4. Ficha de Contrato (Diseño original, pero 100% blanco)
-        st.markdown(f"""
-            <div style="background-color: #1E1E1E; padding: 15px; border-radius: 10px; border: 1px solid #333; margin-top: 10px;">
-                <h4 style="margin: 0; color: #FFFFFF; font-weight: 600;">{j_info['Nombre']}</h4>
-                <p style="margin: 5px 0; color: #FFFFFF; opacity: 0.7; font-size: 14px;">{j_info['Club']} | {j_info['Posicion']}</p>
-                <h3 style="margin: 0; color: #FFFFFF; font-weight: 700;">Precio: €{int(j_info['Precio']):,}</h3>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.write("") # Espaciador
+        with col_f2:
+            # Filtro por precio máximo basado en el presupuesto actual
+            precio_max = st.slider("💰 Precio máximo (€):", 
+                                  min_value=0, 
+                                  max_value=int(df_mercado['Precio'].max()), 
+                                  value=int(df_mercado['Precio'].max()),
+                                  step=100000)
 
-        # 5. Botón de confirmación
-        if st.button("CONFIRMAR FICHAJE", use_container_width=True, type="primary"):
-            c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
-            if c.fetchone()[0] >= 1:
-                st.error("Ya tienes un jugador. Debes venderlo primero.")
-            else:
-                if presupuesto < int(j_info['Precio']):
-                    st.error("Presupuesto insuficiente para este fichaje.")
+        # Aplicar filtros al DataFrame
+        df_filtrado = df_mercado[
+            (df_mercado['Nombre'].str.contains(busqueda_nombre, case=False, na=False)) &
+            (df_mercado['Precio'] <= precio_max)
+        ]
+
+        if not df_filtrado.empty:
+            # Lista para el selectbox con el precio visible desde el inicio
+            opciones_busqueda = df_filtrado.apply(
+                lambda x: f"€{int(x['Precio']):,} - {x['Nombre']} ({x['Club']})", axis=1
+            ).tolist()
+            
+            seleccion_previa = st.selectbox("Seleccionar jugador de la lista filtrada:", options=opciones_busqueda)
+            
+            # Obtener datos del seleccionado
+            indice = opciones_busqueda.index(seleccion_previa)
+            j_info = df_filtrado.iloc[indice]
+            
+            # Ficha de Contrato (Diseño blanco)
+            st.markdown(f"""
+                <div style="background-color: #1E1E1E; padding: 15px; border-radius: 10px; border: 1px solid #333; margin-top: 10px;">
+                    <h4 style="margin: 0; color: #FFFFFF; font-weight: 600;">{j_info['Nombre']}</h4>
+                    <p style="margin: 5px 0; color: #FFFFFF; opacity: 0.7; font-size: 14px;">{j_info['Club']} | {j_info['Posicion']}</p>
+                    <h3 style="margin: 0; color: #FFFFFF; font-weight: 700;">Precio: €{int(j_info['Precio']):,}</h3>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.write("") 
+
+            if st.button("CONFIRMAR FICHAJE", use_container_width=True, type="primary"):
+                c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
+                if c.fetchone()[0] >= 1:
+                    st.error("Ya tienes un jugador. Debes venderlo primero.")
                 else:
-                    c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion, club) VALUES (?,?,?,?,?)",
-                              (user_id, j_info['Nombre'], int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
-                    c.execute("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (int(j_info['Precio']), user_id))
-                    conn.commit()
-                    st.success(f"¡{j_info['Nombre']} ha firmado su contrato!")
-                    st.rerun()
+                    if presupuesto < int(j_info['Precio']):
+                        st.error("Presupuesto insuficiente.")
+                    else:
+                        c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion, club) VALUES (?,?,?,?,?)",
+                                  (user_id, j_info['Nombre'], int(j_info['Precio']), j_info['Posicion'], j_info['Club']))
+                        c.execute("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (int(j_info['Precio']), user_id))
+                        conn.commit()
+                        st.success(f"¡{j_info['Nombre']} contratado!")
+                        st.rerun()
+        else:
+            st.warning("No hay jugadores que coincidan con tu búsqueda o presupuesto.")
 
 # --- 7. GESTIÓN DEL JUGADOR ---
 st.divider()
