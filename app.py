@@ -73,15 +73,7 @@ if prestigio >= 10:
             st.session_state.version += 1
             st.rerun()
 
-st.sidebar.divider()
-with st.sidebar.expander("⚠️ Zona de Peligro"):
-    st.write("Escribe **BORRAR** para resetear:")
-    clave = st.text_input("Palabra clave", key="reset_key").upper()
-    if st.button("RESETEAR TODO EL JUEGO", type="secondary", disabled=(clave != "BORRAR")):
-        ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
-        ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
-        st.session_state.version += 1
-        st.rerun()
+
 
 # --- 4. SCOUTING ---
 with st.expander("🔍 Scouting Global"):
