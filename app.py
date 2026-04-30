@@ -80,7 +80,7 @@ conn.commit()
 c.execute("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto, prestigio = c.fetchone()
 
-# Lógica de Colores Prestigio (Fondo Negro)
+# Estilo Prestigio
 color_numero = "#FF0000"
 if prestigio >= 90: color_numero = "#40E0D0"
 elif prestigio >= 80: color_numero = "#00FF00"
@@ -97,11 +97,10 @@ st.sidebar.markdown(f"""
 st.sidebar.divider()
 st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
-# --- PRÉSTAMO ---
+# --- PRÉSTAMO CON AUTOLIMPIEZA ---
 with st.sidebar.expander("💰 Solicitar Préstamo"):
-    st.write("Recibe **€1,000,000** inmediatos.")
-    st.write("Costo: **-5 puntos** de prestigio.")
-    conf_prestamo = st.checkbox("Confirmar condiciones")
+    st.write("Recibe **€1,000,000** inmediatos. Costo: **-5 puntos**.")
+    conf_prestamo = st.checkbox("Confirmar condiciones", key="chk_pres")
     if st.button("PEDIR PRÉSTAMO", disabled=not conf_prestamo, use_container_width=True):
         nuevo_presupuesto = presupuesto + 1000000
         nuevo_prestigio = max(1, prestigio - 5)
@@ -142,7 +141,6 @@ if not plantel:
 else:
     for j_id, j_nom, j_val, j_pos, j_club in plantel:
         with st.expander(f"{j_pos} | {j_nom.upper()} ({j_club})", expanded=True):
-            # Montos en Amarillo
             st.write(f"**Valor:** :orange[€{int(j_val):,}]")
             st.write(f"**Sueldo x partido:** :orange[€{int(j_val * PORCENTAJE_SUELDO):,}]")
             
@@ -150,7 +148,6 @@ else:
             neto = calcular_resultado_neto(pts, j_val)
             ajuste_p = calcular_ajuste_prestigio(pts)
             
-            # Colores dinámicos
             c_neto = "green" if neto >= 0 else "red"
             c_pres = "green" if ajuste_p >= 0 else "red"
             st.markdown(f"**Balance:** :{c_neto}[{'+' if neto >= 0 else ''}€{neto:,}]")
@@ -162,17 +159,18 @@ else:
             with col_vender:
                 st.write("⚠️ **Venta**")
                 monto_v = j_val - (j_val * PORCENTAJE_SUELDO)
-                conf_v = st.checkbox(f"Vender por €{int(monto_v):,}", key=f"c_v_{j_id}")
-                if st.button("🗑️ Vender Jugador", key=f"v_{j_id}", disabled=not conf_v, use_container_width=True):
+                conf_v = st.checkbox(f"Vender por €{int(monto_v):,}", key=f"chk_v_{j_id}")
+                if st.button("🗑️ Vender Jugador", key=f"btn_v_{j_id}", disabled=not conf_v, use_container_width=True):
                     c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
                     c.execute("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_v, user_id))
                     conn.commit()
+                    # El st.rerun limpia el checkbox automáticamente al recargar
                     st.rerun()
 
             with col_procesar:
                 st.write("🚀 **Procesar**")
-                conf_p = st.checkbox("Confirmar resultados", key=f"c_p_{j_id}")
-                if st.button("✅ PROCESAR FECHA", key=f"a_{j_id}", disabled=not conf_p, type="primary", use_container_width=True):
+                conf_p = st.checkbox("Confirmar resultados", key=f"chk_p_{j_id}")
+                if st.button("✅ PROCESAR FECHA", key=f"btn_p_{j_id}", disabled=not conf_p, type="primary", use_container_width=True):
                     if (presupuesto + neto) < 0:
                         st.error("Saldo insuficiente.")
                     else:
@@ -184,7 +182,7 @@ else:
 # --- 7. REINICIO ---
 st.sidebar.divider()
 with st.sidebar.expander("Reiniciar Carrera"):
-    conf_reinicio = st.checkbox("Confirmar reinicio total")
+    conf_reinicio = st.checkbox("Confirmar reinicio total", key="chk_reinicio")
     if st.button("EJECUTAR REINICIO", disabled=not conf_reinicio, type="primary", use_container_width=True):
         c.execute("DELETE FROM jugadores WHERE usuario_id = ?", (user_id,))
         c.execute("UPDATE usuarios SET presupuesto = ?, prestigio = ? WHERE id = ?", (PRESUPUESTO_INICIAL, PRESTIGIO_INICIAL, user_id))
