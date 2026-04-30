@@ -69,68 +69,43 @@ def forzar_limpieza():
     st.session_state.version += 1
 
 # --- 4. INTERFAZ Y LOGIN ---
-st.set_page_config(page_title="Agencia de Representantes", layout="wide")
-st.markdown("## 💼 Agencia de Representantes")
+st.set_page_config(page_title="Representante de Fútbol", layout="wide")
+st.markdown("## ⚽ Agencia de Jugadores")
 
-user_name = st.sidebar.text_input("Nombre del Agente").strip()
+user_name = st.sidebar.text_input("Tu Nombre").strip()
 if not user_name:
-    st.info("👋 Ingresa tu nombre para gestionar tu agencia.")
-    st.sidebar.divider()
-    st.sidebar.subheader("🏆 Ranking de Agencias")
-    c.execute("SELECT nombre, prestigio FROM usuarios ORDER BY prestigio DESC LIMIT 5")
-    for i, (n, p) in enumerate(c.fetchall(), 1):
-        st.sidebar.write(f"{i}. {n} ({p} pts)")
+    st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
-# Inicializar Usuario
+# Datos del Usuario
 PRESUPUESTO_INICIAL = 2000000
 c.execute("INSERT OR IGNORE INTO usuarios (nombre, presupuesto, prestigio) VALUES (?, ?, 40)", (user_name, PRESUPUESTO_INICIAL))
 conn.commit()
 c.execute("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (user_name,))
 user_id, presupuesto, prestigio = c.fetchone()
 
-# --- 5. LÓGICA DE RANGOS Y BENEFICIOS ---
-if prestigio >= 85:
-    rango, color, cupo_maximo = "💎 MAGNATE DEL MERCADO", "#40E0D0", 4
-elif prestigio >= 70:
-    rango, color, cupo_maximo = "🏢 SOCIO DE AGENCIA ELITE", "#00FF00", 3
-elif prestigio >= 45:
-    rango, color, cupo_maximo = "🤝 BRÓKER DE TRANSFERENCIAS", "#FFFF00", 2
-else:
-    rango, color, cupo_maximo = "👟 PROMOTOR DE JUVENILES", "#FF4B4B", 1
+# Estilo de Prestigio
+color_p = "#FF4B4B"
+if prestigio >= 90: color_p = "#40E0D0"
+elif prestigio >= 60: color_p = "#00FF00"
+elif prestigio >= 40: color_p = "#FFA500"
 
-# --- 6. SIDEBAR ---
 st.sidebar.markdown(f"""
     <div style="background-color: #000; padding: 20px; border-radius: 15px; text-align: center; border: 1px solid #333;">
         <p style="color: #666; margin: 0; font-size: 12px; letter-spacing: 2px;">PRESTIGIO</p>
-        <h1 style="color: {color}; margin: 0; font-size: 60px;">{prestigio}</h1>
-        <p style="color: {color}; font-weight: bold; font-size: 14px; margin: 0; text-transform: uppercase;">{rango}</p>
-        <p style="color: #888; font-size: 11px; margin-top: 5px;">Cartera Máxima: {cupo_maximo} Clientes</p>
+        <h1 style="color: {color_p}; margin: 0; font-size: 60px;">{prestigio}</h1>
     </div>
     """, unsafe_allow_html=True)
 
 st.sidebar.divider()
-st.sidebar.metric("Billetera", f"€{int(presupuesto):,}")
+st.sidebar.metric("Presupuesto", f"€{int(presupuesto):,}")
 
-# Préstamo
-with st.sidebar.expander("💰 Solicitar Capital"):
-    if st.button("PEDIR €1M (Cuesta -5 Prestigio)", use_container_width=True):
-        c.execute("UPDATE usuarios SET presupuesto = presupuesto + 1000000, prestigio = MAX(1, prestigio - 5) WHERE id = ?", (user_id,))
-        conn.commit()
-        st.rerun()
-
-# Ranking
-st.sidebar.subheader("🏆 Top Agencias")
-c.execute("SELECT nombre, prestigio FROM usuarios ORDER BY prestigio DESC LIMIT 5")
-for i, (nom, pres) in enumerate(c.fetchall(), 1):
-    st.sidebar.write(f"{i}. {nom} ({pres} pts)")
-
-# --- 7. MERCADO DE PASES CON FILTROS ---
-with st.expander("🛒 Buscar Nuevos Clientes"):
+# --- 5. MERCADO DE PASES ---
+with st.expander("🛒 Mercado de Pases"):
     if df_mercado is not None:
         col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
         with col_f1:
-            bus_nom = st.text_input("🔍 Nombre:", key=f"bn_{st.session_state.version}")
+            bus_nom = st.text_input("🔍 Buscar:", key=f"bn_{st.session_state.version}")
         with col_f2:
             p_min = st.number_input("Min €:", 0, value=0, step=100000)
         with col_f3:
@@ -139,22 +114,23 @@ with st.expander("🛒 Buscar Nuevos Clientes"):
         df_f = df_mercado[(df_mercado['Nombre'].str.contains(bus_nom, case=False, na=False)) & (df_mercado['Precio'].between(p_min, p_max))]
         
         if not df_f.empty:
+            # Orden solicitado: Nombre / Monto / Posición / Equipo
             opciones = df_f.apply(lambda x: f"{x['Nombre']}/ {formatear_monto(x['Precio'])}/ {x['Posicion']}/ {x['Club']}", axis=1).tolist()
-            sel = st.selectbox("Seleccionar:", opciones)
+            sel = st.selectbox("Seleccionar jugador:", opciones)
             j_data = df_f.iloc[opciones.index(sel)]
             
-            st.markdown(f"""<div style="background-color: #1E1E1E; padding: 15px; border-radius: 10px; border: 1px solid #333;">
-                <h4 style="margin: 0;">{j_data['Nombre']}</h4>
-                <p style="margin: 0; opacity: 0.7;">{j_data['Club']} | {j_data['Posicion']}</p>
-                <h3 style="margin: 0;">Costo: €{formatear_monto(j_data['Precio'])}</h3>
+            st.markdown(f"""<div style="background-color: #1E1E1E; padding: 15px; border-radius: 10px; border: 1px solid #333; margin-top: 10px;">
+                <h4 style="margin: 0; color: #FFF;">{j_data['Nombre']}</h4>
+                <p style="margin: 5px 0; color: #FFF; opacity: 0.7;">{j_data['Club']} | {j_data['Posicion']}</p>
+                <h3 style="margin: 0; color: #FFF;">Precio: €{formatear_monto(j_data['Precio'])}</h3>
             </div>""", unsafe_allow_html=True)
 
-            if st.button("FIRMAR CONTRATO", use_container_width=True, type="primary"):
+            if st.button("CONFIRMAR FICHAJE", use_container_width=True, type="primary"):
                 c.execute("SELECT COUNT(*) FROM jugadores WHERE usuario_id = ?", (user_id,))
-                if c.fetchone()[0] >= cupo_maximo:
-                    st.error(f"⚠️ Cartera llena. {rango} solo permite {cupo_maximo} clientes.")
+                if c.fetchone()[0] >= 1:
+                    st.error("Ya tienes un jugador en tu cartera.")
                 elif presupuesto < j_data['Precio']:
-                    st.error("Dinero insuficiente.")
+                    st.error("Presupuesto insuficiente.")
                 else:
                     c.execute("INSERT INTO jugadores (usuario_id, nombre, valor, posicion, club) VALUES (?,?,?,?,?)",
                               (user_id, j_data['Nombre'], j_data['Precio'], j_data['Posicion'], j_data['Club']))
@@ -163,53 +139,54 @@ with st.expander("🛒 Buscar Nuevos Clientes"):
                     forzar_limpieza()
                     st.rerun()
 
-# --- 8. GESTIÓN DE CARTERA (CLIENTES) ---
+# --- 6. GESTIÓN DEL JUGADOR ---
 st.divider()
-st.subheader(f"📋 Clientes en Cartera")
 c.execute("SELECT id, nombre, valor, posicion, club FROM jugadores WHERE usuario_id = ?", (user_id,))
-mis_jugadores = c.fetchall()
+jugador = c.fetchone()
 
-if not mis_jugadores:
-    st.info("Aún no representas a ningún jugador. Ve al mercado para buscar clientes.")
+if not jugador:
+    st.info("No tienes jugadores asignados.")
 else:
-    # Mostramos los jugadores en columnas para aprovechar el espacio
-    cols = st.columns(len(mis_jugadores))
-    for idx, (j_id, j_nom, j_val, j_pos, j_club) in enumerate(mis_jugadores):
-        with cols[idx]:
-            with st.container(border=True):
-                st.write(f"**{j_nom}**")
-                st.caption(f"{j_pos} | {j_club}")
-                st.write(f"Valor: €{formatear_monto(j_val)}")
-                
-                pts = st.number_input(f"Puntaje", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
-                neto = calcular_resultado_neto(pts, j_val)
-                ajuste_p = calcular_ajuste_prestigio(pts)
-                
-                st.markdown(f"Neto: :{'green' if neto>=0 else 'red'}[€{neto:,}]")
-                
-                if st.button(f"PROCESAR FECHA", key=f"btn_{j_id}", use_container_width=True):
-                    nuevo_pres = presupuesto + neto
-                    nuevo_pres_total = max(0, nuevo_pres)
-                    nuevo_pres_final = prestigio + ajuste_p
-                    c.execute("UPDATE usuarios SET presupuesto = ?, prestigio = MAX(1, MIN(100, ?)) WHERE id = ?", 
-                             (nuevo_pres, nuevo_pres_final, user_id))
+    j_id, j_nom, j_val, j_pos, j_club = jugador
+    st.subheader(f"📋 Cliente: {j_nom}")
+    
+    with st.container(border=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**Club:** {j_club}")
+            st.write(f"**Posición:** {j_pos}")
+            st.write(f"**Valor de Mercado:** €{formatear_monto(j_val)}")
+        
+        with col2:
+            pts = st.number_input("Puntaje de la fecha:", 1.0, 10.0, 6.4, step=0.1)
+            neto = calcular_resultado_neto(pts, j_val)
+            ajuste_p = calcular_ajuste_prestigio(pts)
+            st.markdown(f"**Resultado Económico:** :{'green' if neto>=0 else 'red'}[€{neto:,}]")
+            st.markdown(f"**Impacto Prestigio:** :{'green' if ajuste_p>=0 else 'red'}[{ajuste_p} pts]")
+
+        st.divider()
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.checkbox("Vender jugador (Comisión 2%)"):
+                if st.button("VENDER AHORA", type="primary", use_container_width=True):
+                    c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
+                    c.execute("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_val * 0.98, user_id))
                     conn.commit()
                     st.rerun()
-                
-                if st.checkbox("Vender (98%)", key=f"vchk_{j_id}"):
-                    if st.button("CONFIRMAR VENTA", key=f"vbtn_{j_id}", type="primary"):
-                        c.execute("DELETE FROM jugadores WHERE id = ?", (j_id,))
-                        c.execute("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_val * 0.98, user_id))
-                        conn.commit()
-                        st.rerun()
+        with b2:
+            if st.button("✅ PROCESAR FECHA", type="primary", use_container_width=True):
+                nuevo_prestigio = max(1, min(100, prestigio + ajuste_p))
+                c.execute("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", (neto, nuevo_prestigio, user_id))
+                conn.commit()
+                st.rerun()
 
-# --- 9. ADMINISTRACIÓN (BORRAR USUARIOS) ---
+# --- 7. ADMIN ---
 st.sidebar.divider()
-with st.sidebar.expander("⚙️ Admin Sistema"):
+with st.sidebar.expander("⚙️ Administración"):
     c.execute("SELECT nombre FROM usuarios")
     lista_u = [r[0] for r in c.fetchall()]
-    u_del = st.selectbox("Borrar Usuario:", lista_u)
-    if st.button("ELIMINAR DEFINITIVAMENTE", type="primary"):
+    u_del = st.selectbox("Eliminar Usuario:", lista_u)
+    if st.button("BORRAR DEFINITIVAMENTE", type="primary", use_container_width=True):
         c.execute("DELETE FROM jugadores WHERE usuario_id = (SELECT id FROM usuarios WHERE nombre = ?)", (u_del,))
         c.execute("DELETE FROM usuarios WHERE nombre = ?", (u_del,))
         conn.commit()
