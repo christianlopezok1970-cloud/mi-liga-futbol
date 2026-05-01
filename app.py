@@ -157,13 +157,11 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         bal = calcular_balance_fecha(pts, j_costo)
         col_input.markdown(f"Resultado: :{'green' if pts>=6.6 else 'red' if pts<=6.3 else 'gray'}[€ {formatear_total(bal)}]")
         
-       with col_ops:
+        with col_ops:
             conf = st.checkbox("Confirmar", key=f"check_{v_key}", value=False)
             
             # Cálculo del valor de venta (99%)
             valor_venta = j_costo * 0.99
-            
-            # USAMOS EL MISMO NOMBRE: texto_venta
             texto_venta = f"VENDER (€ {formatear_total(valor_venta)})"
             
             c_c1, c_c2 = st.columns(2)
@@ -176,16 +174,6 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
                 st.session_state.version += 1
                 st.rerun()
             
-            # Ahora el botón encontrará la variable 'texto_venta' correctamente
-            if c_c2.button(texto_venta, key=f"btn_v_{v_key}", disabled=not conf, use_container_width=True):
-                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                            (u_id, f"Venta {int(j_pct)}% {j_nom}", valor_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_venta, u_id), commit=True)
-                st.session_state.version += 1
-                st.rerun()
-            
-            # El botón ahora muestra dinámicamente el precio
             if c_c2.button(texto_venta, key=f"btn_v_{v_key}", disabled=not conf, use_container_width=True):
                 ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
                             (u_id, f"Venta {int(j_pct)}% {j_nom}", valor_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
