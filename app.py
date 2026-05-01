@@ -1,9 +1,10 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+from datetime import datetime
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v37.db'
+DB_NAME = 'agencia_global_v39.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -40,12 +41,14 @@ def cargar_datos_completos_google():
         return df
     except: return pd.DataFrame()
 
-# Tablas
+# Tablas (Añadida tabla de historial)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre_jugador TEXT, 
               porcentaje REAL, costo_compra REAL, club TEXT)''', commit=True)
+ejecutar_db('''CREATE TABLE IF NOT EXISTS historial 
+             (id INTEGER PRIMARY KEY, usuario_id INTEGER, detalle TEXT, monto REAL, fecha TEXT)''', commit=True)
 
 # --- 2. LÓGICA ---
 def calcular_balance_fecha(pts, costo):
@@ -88,6 +91,8 @@ if prestigio >= 1:
     with st.sidebar.popover("💰 Crédito"):
         if st.button("Confirmar (€ 150.000 x -1 Reputación)"):
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 150000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
+            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                        (u_id, "Crédito Bancario", 150000, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
             st.session_state.version += 1
             st.rerun()
 
@@ -96,6 +101,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
         if st.text_input("Escribe la clave:").upper() == "BORRAR":
             if st.button("EJECUTAR RESET"):
                 ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
+                ejecutar_db("DELETE FROM historial WHERE usuario_id = ?", (u_id,), commit=True)
                 ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
                 st.session_state.version += 1
                 st.rerun()
@@ -113,8 +119,8 @@ with st.expander("🔍 Scouting y Co-propiedad"):
             if existe:
                 st.warning(f"⚠️ Ya tienes a {nom} en tu cartera.")
             else:
-                vendido = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
-                disp = 100 - (vendido[0][0] if vendido[0][0] else 0)
+                vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
+                disp = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
                 if disp > 0:
                     st.info(f"📊 Disponible: {int(disp)}%")
                     opciones = [p for p in [25, 50, 75, 100] if p <= disp]
@@ -126,6 +132,8 @@ with st.expander("🔍 Scouting y Co-propiedad"):
                             ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
                                         (u_id, nom, pct, costo, dj.iloc[1]), commit=True)
                             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo, u_id), commit=True)
+                            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                                        (u_id, f"Compra {int(pct)}% {nom}", -costo, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                             st.session_state.version += 1
                             st.rerun()
 
@@ -151,25 +159,39 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
             if c_c1.button("CARGAR", key=f"btn_r_{v_key}", type="primary", disabled=not conf, use_container_width=True):
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
                             (bal, calcular_cambio_prestigio(pts), u_id), commit=True)
+                if bal != 0:
+                    ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                                (u_id, f"Rendimiento {j_nom}", bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                 st.session_state.version += 1
                 st.rerun()
             if c_c2.button("VENDER", key=f"btn_v_{v_key}", disabled=not conf, use_container_width=True):
+                monto_venta = j_costo * 0.99
+                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                            (u_id, f"Venta {int(j_pct)}% {j_nom}", monto_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                 ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_costo*0.99, u_id), commit=True)
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_venta, u_id), commit=True)
                 st.session_state.version += 1
                 st.rerun()
 
-# --- 6. RANKING DE AGENTES (POR REPUTACIÓN) ---
+# --- 6. RANKING Y HISTORIAL ---
 st.divider()
-with st.expander("🏆 Ranking"):
-    usuarios_raw = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios")
-    
-    # Crear DataFrame y ordenar estrictamente por prestigio
-    df_ranking = pd.DataFrame(usuarios_raw, columns=['Agente', 'Reputación (pts)', 'Presupuesto'])
-    df_ranking = df_ranking.sort_values(by='Reputación (pts)', ascending=False).reset_index(drop=True)
-    df_ranking.index += 1 # Posición 1, 2, 3...
-    
-    # Formatear la columna de Presupuesto para que se vea bien en la tabla
-    df_ranking['Presupuesto'] = df_ranking['Presupuesto'].apply(lambda x: f"€ {formatear_total(x)}")
-    
-    st.table(df_ranking)
+c_rank, c_hist = st.columns(2)
+
+with c_rank:
+    with st.expander("🏆 Ranking"):
+        usuarios_raw = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios")
+        df_ranking = pd.DataFrame(usuarios_raw, columns=['Agente', 'Reputación (pts)', 'Presupuesto'])
+        df_ranking = df_ranking.sort_values(by='Reputación (pts)', ascending=False).reset_index(drop=True)
+        df_ranking.index += 1
+        df_ranking['Presupuesto'] = df_ranking['Presupuesto'].apply(lambda x: f"€ {formatear_total(x)}")
+        st.table(df_ranking)
+
+with c_hist:
+    with st.expander("📜 Historial de Operaciones"):
+        historial_raw = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 20", (u_id,))
+        if historial_raw:
+            df_hist = pd.DataFrame(historial_raw, columns=['Fecha', 'Detalle', 'Monto'])
+            df_hist['Monto'] = df_hist['Monto'].apply(lambda x: f"{'🟢' if x>0 else '🔴'} € {formatear_total(x)}")
+            st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        else:
+            st.write("No hay operaciones registradas.")
