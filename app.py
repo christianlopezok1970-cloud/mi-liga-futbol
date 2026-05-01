@@ -1,8 +1,10 @@
 import streamlit as st
 import sqlite3
+import pandas as pd
 
-# --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v16.db'
+# --- 1. CONFIGURACIÓN DE BASE DE DATOS Y LISTADO EXTERNO ---
+DB_NAME = 'agencia_global_v18.db'
+SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
     with sqlite3.connect(DB_NAME, check_same_thread=False) as conn:
@@ -10,6 +12,17 @@ def ejecutar_db(query, params=(), commit=False):
         c.execute(query, params)
         if commit: conn.commit()
         return c.fetchall()
+
+@st.cache_data(ttl=300) # Se actualiza cada 5 minutos
+def cargar_listado_google():
+    try:
+        df = pd.read_csv(SHEET_URL)
+        # Tomamos la primera columna (nombres de jugadores)
+        columna_nombres = df.columns[0] 
+        return sorted(df[columna_nombres].dropna().unique().tolist())
+    except Exception as e:
+        st.error(f"Error conectando con el listado oficial: {e}")
+        return []
 
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
@@ -52,7 +65,7 @@ st.subheader("🌎 World Transfer Market")
 manager = st.sidebar.text_input("Nombre del Agente:").strip()
 
 if not manager:
-    st.info("👋 Ingresa tu nombre en la barra lateral.")
+    st.info("👋 Ingresa tu nombre en la barra lateral para comenzar.")
     st.stop()
 
 datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
@@ -68,23 +81,20 @@ st.sidebar.metric("Caja Global", f"€ {formatear_monto(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
 st.sidebar.divider()
-# Préstamo de 150k
 if prestigio >= 1:
     with st.sidebar.popover("💰 Pedir Crédito"):
         st.write("Solicitar **€ 150.000**")
-        st.caption("Costo: -1 punto de reputación.")
+        st.caption("Costo: -1 punto de prestigio.")
         if st.button("CONFIRMAR CRÉDITO"):
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 150000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
             st.session_state.version += 1
             st.rerun()
 
-# --- BOTÓN DE RESET CON SEGURIDAD ---
+# Reset con seguridad
 st.sidebar.divider()
 bloqueo_seguridad = st.sidebar.toggle("🔒 Bloquear Reset", value=True)
-
 if not bloqueo_seguridad:
     with st.sidebar.expander("⚠️ ZONA DE PELIGRO"):
-        st.write("Para reiniciar tu carrera, escribe la palabra clave:")
         clave = st.text_input("Palabra clave:", key="reset_key").upper()
         if st.button("RESETEAR TODO EL JUEGO", type="secondary", disabled=(clave != "BORRAR")):
             ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
@@ -92,44 +102,44 @@ if not bloqueo_seguridad:
             st.session_state.version += 1
             st.rerun()
 
-# --- 4. SCOUTING ---
-lista_jugadores_db = ejecutar_db("SELECT DISTINCT nombre_jugador FROM cartera WHERE usuario_id = ?", (u_id,))
-opciones_jugadores = [j[0] for j in lista_jugadores_db]
+# --- 4. SCOUTING (SOLO LISTADO OFICIAL) ---
+opciones_oficiales = cargar_listado_google()
 
 with st.expander("🔍 Scouting"):
-    c1, c2 = st.columns(2)
-    
-    nombre_j = c1.selectbox("Jugador (selecciona o escribe):", 
-                             options=[""] + opciones_jugadores, 
-                             index=0,
-                             placeholder="Selecciona uno existente...")
-    
-    if nombre_j == "":
-        nombre_j = c1.text_input("O escribe un nuevo nombre:")
+    if not opciones_oficiales:
+        st.warning("No se pudo cargar el listado oficial. Verifica tu conexión.")
+    else:
+        c1, c2 = st.columns(2)
+        
+        # ELIMINADO EL INGRESO MANUAL. Solo se puede elegir de la lista.
+        nombre_j = c1.selectbox("Seleccionar Jugador Autorizado:", 
+                                 options=[""] + opciones_oficiales, 
+                                 index=0)
 
-    club_j = c1.text_input("Club:")
-    liga_j = c1.text_input("Liga:")
-    
-    valor_100 = c2.number_input("Valor 100%:", min_value=0, step=50000, value=1000000)
-    pct_compra = c2.slider("% adquirido:", 5, 100, 10)
-    
-    costo_final = (valor_100 * pct_compra) / 100
-    st.write(f"Inversión total: **€ {formatear_monto(costo_final)}**")
-    
-    if st.button("CERRAR TRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final or nombre_j == "")):
-        ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club, liga) VALUES (?,?,?,?,?,?)",
-                    (u_id, nombre_j, pct_compra, costo_final, club_j, liga_j), commit=True)
-        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_final, u_id), commit=True)
-        st.session_state.version += 1
-        st.rerun()
+        club_j = c1.text_input("Club:")
+        liga_j = c1.text_input("Liga:")
+        
+        valor_100 = c2.number_input("Valor 100% (Market Value):", min_value=0, step=50000, value=1000000)
+        pct_compra = c2.slider("% de la ficha a adquirir:", 5, 100, 10)
+        
+        costo_final = (valor_100 * pct_compra) / 100
+        st.write(f"Inversión requerida: **€ {formatear_monto(costo_final)}**")
+        
+        # El botón solo se activa si hay un nombre seleccionado de la lista
+        if st.button("CERRAR TRATO", use_container_width=True, type="primary", 
+                     disabled=(presupuesto < costo_final or nombre_j == "")):
+            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club, liga) VALUES (?,?,?,?,?,?)",
+                        (u_id, nombre_j, pct_compra, costo_final, club_j, liga_j), commit=True)
+            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_final, u_id), commit=True)
+            st.session_state.version += 1
+            st.rerun()
 
 # --- 5. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Jugadores Representados")
-
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club, liga FROM cartera WHERE usuario_id = ?", (u_id,))
 
 if not cartera:
-    st.warning("No tienes activos.")
+    st.info("Aún no tienes jugadores representados.")
 else:
     for j_id, j_nom, j_pct, j_costo, j_club, j_liga in cartera:
         with st.container(border=True):
@@ -146,13 +156,12 @@ else:
             col_input.markdown(f"Rendimiento: :{color_bal}[€ {formatear_monto(balance)}]")
             
             with col_ops:
-                confirmar = st.checkbox("Confirmar", key=f"conf_{v_key}")
-                
+                confirmar = st.checkbox("Confirmar operación", key=f"conf_{v_key}")
                 perdida_venta = j_costo * 0.01
                 recupero = j_costo - perdida_venta
                 
                 if confirmar:
-                    st.error(f"⚠️ Pérdida por venta: € {formatear_monto(perdida_venta)}")
+                    st.error(f"⚠️ Venta: Pierdes € {formatear_monto(perdida_venta)}")
 
                 if st.button("CARGAR RENDIMIENTO", key=f"btn_p_{v_key}", disabled=not confirmar, use_container_width=True, type="primary"):
                     cambio_rep = calcular_cambio_prestigio(pts_365)
