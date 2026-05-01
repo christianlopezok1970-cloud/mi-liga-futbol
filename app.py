@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS Y LISTADO EXTERNO ---
-DB_NAME = 'agencia_global_v22.db'
+DB_NAME = 'agencia_global_v23.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -31,7 +31,6 @@ def cargar_datos_completos_google():
         df = pd.read_csv(SHEET_URL)
         df.columns = [c.strip() for c in df.columns]
         
-        # Función interna para limpiar y convertir la cotización del Excel a número
         def limpiar_valor(val):
             try:
                 s = str(val).replace('.','').replace(',','')
@@ -39,8 +38,6 @@ def cargar_datos_completos_google():
             except:
                 return 1000000
 
-        # Crear la etiqueta combinada: NOMBRE (POS) - € VALOR
-        # Asumiendo columnas: 0:Nombre, 1:Equipo, 2:Pos, 3:Cotización
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
         df['Display'] = (
             df.iloc[:, 0] + " (" + df.iloc[:, 2] + ") - € " + 
@@ -122,7 +119,7 @@ if not bloqueo_reset:
             ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
             st.rerun()
 
-# --- 5. SCOUTING CON DISPLAY COMBINADO ---
+# --- 5. SCOUTING ---
 df_oficial = cargar_datos_completos_google()
 
 with st.expander("🔍 Scouting"):
@@ -130,7 +127,6 @@ with st.expander("🔍 Scouting"):
         st.warning("No se pudo leer el listado.")
     else:
         c1, c2 = st.columns(2)
-        # Aquí aparece: Nombre (POS) - € 1,5M
         seleccion = c1.selectbox("Jugador Autorizado:", options=[""] + df_oficial['Display'].tolist())
         
         if seleccion:
@@ -143,10 +139,16 @@ with st.expander("🔍 Scouting"):
             liga_j = c1.text_input("Liga:")
             
             valor_100 = c2.number_input("Valor 100%:", min_value=0, value=cotizacion_sugerida, step=50000)
-            pct_compra = c2.slider("% de la ficha:", 5, 100, 10)
+            
+            # --- CAMBIO AQUÍ: Deslizante con valores fijos ---
+            pct_compra = c2.select_slider(
+                "% de la ficha a adquirir:",
+                options=[25, 50, 75, 100],
+                value=25
+            )
             
             costo_final = (valor_100 * pct_compra) / 100
-            st.write(f"Inversión Requerida: **€ {formatear_monto(costo_final)}**")
+            st.write(f"Inversión Requerida ({pct_compra}%): **€ {formatear_monto(costo_final)}**")
             
             if st.button("CERRAR TRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final)):
                 ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club, liga) VALUES (?,?,?,?,?,?)",
@@ -166,7 +168,7 @@ for j_id, j_nom, j_pct, j_costo, j_club, j_liga in cartera:
         
         col_info.subheader(j_nom)
         col_info.write(f"🌍 **{j_club}**")
-        col_info.caption(f"{j_pct}% | € {formatear_monto(j_costo)}")
+        col_info.caption(f"{int(j_pct)}% | € {formatear_monto(j_costo)}")
         
         pts_365 = col_input.number_input(f"Score 365", 1.0, 10.0, 6.4, step=0.1, key=f"pts_{v_key}")
         balance = calcular_balance_fecha(pts_365, j_costo)
