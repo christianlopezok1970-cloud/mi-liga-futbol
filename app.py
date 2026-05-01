@@ -124,22 +124,37 @@ with st.expander("🔍 Scouting y Co-propiedad"):
                 st.warning(f"⚠️ Ya tienes a {nom} en tu cartera.")
             else:
                 vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
-                disp = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
-                if disp > 0:
-                    st.info(f"📊 Disponible: {int(disp)}%")
-                    opciones = [p for p in [25, 50, 75, 100] if p <= disp]
-                    if opciones:
-                        pct = c2.select_slider("Porcentaje:", opciones, key=f"pct_{st.session_state.version}")
-                        costo = (int(dj['ValorNum']) * pct) / 100
-                        st.write(f"Inversión: **€ {formatear_total(costo)}**")
-                        if st.button("CERRAR TRATO", type="primary") and presupuesto >= costo:
-                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
-                                        (u_id, nom, pct, costo, dj.iloc[1]), commit=True)
-                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo, u_id), commit=True)
-                            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                                        (u_id, f"Compra {int(pct)}% {nom}", -costo, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                            st.session_state.version += 1
-                            st.rerun()
+                disp_mercado = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
+                
+                # NUEVA LÓGICA: El límite es el menor entre lo disponible y tu prestigio
+                limite_agente = int(prestigio)
+                disp_final = min(disp_mercado, limite_agente)
+                
+                if disp_final <= 0:
+                    st.error(f"🚫 No puedes comprar. Tu prestigio ({prestigio}) es demasiado bajo o no hay stock.")
+                else:
+                    st.info(f"📊 Máximo permitido por tu prestigio: {disp_final}%")
+                    
+                    # Creamos las opciones del slider: 1%, 5%, 10%, etc., hasta tu límite
+                    opciones = [p for p in [1, 5, 10, 25, 50, 75, 100] if p <= disp_final]
+                    
+                    # Si el límite exacto no está en la lista (ej: 12), lo añadimos para que puedas comprar el máximo
+                    if disp_final not in opciones and disp_final > 0:
+                        opciones.append(disp_final)
+                        opciones.sort()
+
+                    pct = c2.select_slider("Porcentaje a comprar:", opciones, key=f"pct_{st.session_state.version}")
+                    costo = (int(dj['ValorNum']) * pct) / 100
+                    st.write(f"Inversión: **€ {formatear_total(costo)}**")
+                    
+                    if st.button("CERRAR TRATO", type="primary") and presupuesto >= costo:
+                        ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
+                                    (u_id, nom, pct, costo, dj.iloc[1]), commit=True)
+                        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo, u_id), commit=True)
+                        ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                                    (u_id, f"Compra {int(pct)}% {nom}", -costo, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                        st.session_state.version += 1
+                        st.rerun()
 
 # --- 5. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Mis Jugadores Representados")
