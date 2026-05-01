@@ -65,7 +65,7 @@ def calcular_cambio_prestigio(pts):
 st.set_page_config(page_title="World Transfer Market", layout="wide")
 if 'version' not in st.session_state: st.session_state.version = 0
 
-st.subheader("🌎 World Transfer Market")
+st.subheader("Transfer Market")
 
 manager = st.sidebar.text_input("Nombre del Agente:").strip()
 if not manager:
@@ -86,14 +86,14 @@ st.sidebar.metric("Reputación", f"{prestigio} pts")
 st.sidebar.divider()
 if prestigio >= 1:
     with st.sidebar.popover("💰 Crédito"):
-        if st.button("CONFIRMAR (€ 150.000)"):
+        if st.button("Confirmar (€ 150.000 x -1 Reputación)"):
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 150000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
             st.session_state.version += 1
             st.rerun()
 
 if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
     with st.sidebar.expander("⚠️ RESET"):
-        if st.text_input("Escribe 'BORRAR':").upper() == "BORRAR":
+        if st.text_input("Escribe la clave:").upper() == "BORRAR":
             if st.button("EJECUTAR RESET"):
                 ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
                 ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
@@ -161,7 +161,7 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
 
 # --- 6. RANKING DE AGENTES (POR REPUTACIÓN) ---
 st.divider()
-with st.expander("🏆 Ranking de Reputación"):
+with st.expander("🏆 Ranking"):
     usuarios_raw = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios")
     
     # Crear DataFrame y ordenar estrictamente por prestigio
