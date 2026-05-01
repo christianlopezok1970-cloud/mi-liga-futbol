@@ -74,7 +74,7 @@ if not manager:
 
 datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
 if not datos:
-    ejecutar_db("INSERT INTO usuarios (nombre, presupuesto, prestigio) VALUES (?, 1000000, 40)", (manager,), commit=True)
+    ejecutar_db("INSERT INTO usuarios (nombre, presupuesto, prestigio) VALUES (?, 2000000, 10)", (manager,), commit=True)
     st.rerun()
 
 u_id, presupuesto, prestigio = datos[0]
@@ -96,7 +96,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
         if st.text_input("Escribe la clave:").upper() == "BORRAR":
             if st.button("EJECUTAR RESET"):
                 ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
+                ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
                 st.session_state.version += 1
                 st.rerun()
 
