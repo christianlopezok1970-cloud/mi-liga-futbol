@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS Y LISTADO EXTERNO ---
-DB_NAME = 'agencia_global_v23.db'
+DB_NAME = 'agencia_global_v24.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -52,7 +52,7 @@ ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre_jugador TEXT, 
-              porcentaje REAL, costo_compra REAL, club TEXT, liga TEXT)''', commit=True)
+              porcentaje REAL, costo_compra REAL, club TEXT)''', commit=True)
 
 # --- 3. LÓGICA DE JUEGO ---
 def calcular_balance_fecha(puntaje, costo_proporcional):
@@ -136,11 +136,9 @@ with st.expander("🔍 Scouting"):
             cotizacion_sugerida = int(datos_j['ValorNum'])
 
             club_j = c1.text_input("Club:", value=equipo_sugerido)
-            liga_j = c1.text_input("Liga:")
             
             valor_100 = c2.number_input("Valor 100%:", min_value=0, value=cotizacion_sugerida, step=50000)
             
-            # --- CAMBIO AQUÍ: Deslizante con valores fijos ---
             pct_compra = c2.select_slider(
                 "% de la ficha a adquirir:",
                 options=[25, 50, 75, 100],
@@ -151,17 +149,17 @@ with st.expander("🔍 Scouting"):
             st.write(f"Inversión Requerida ({pct_compra}%): **€ {formatear_monto(costo_final)}**")
             
             if st.button("CERRAR TRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final)):
-                ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club, liga) VALUES (?,?,?,?,?,?)",
-                            (u_id, nombre_real, pct_compra, costo_final, club_j, liga_j), commit=True)
+                ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
+                            (u_id, nombre_real, pct_compra, costo_final, club_j), commit=True)
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_final, u_id), commit=True)
                 st.session_state.version += 1
                 st.rerun()
 
 # --- 6. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Jugadores Representados")
-cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club, liga FROM cartera WHERE usuario_id = ?", (u_id,))
+cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 
-for j_id, j_nom, j_pct, j_costo, j_club, j_liga in cartera:
+for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         col_info, col_input, col_ops = st.columns([2, 2, 2])
         v_key = f"{st.session_state.version}_{j_id}"
