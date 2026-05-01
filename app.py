@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v29.db'
+DB_NAME = 'agencia_global_v30.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -128,21 +128,21 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         col_info, col_input, col_ops = st.columns([2, 2, 2])
         v_key = f"{st.session_state.version}_{j_id}"
         
-        # Info del Jugador con tamaño de fuente aumentado
         col_info.subheader(j_nom)
         col_info.write(f"🌍 {j_club}")
-        # --- CAMBIO AQUÍ: HTML para aumentar tamaño de fuente de datos de ficha ---
+        
+        # --- DATO EN AMARILLO Y MÁS GRANDE ---
         col_info.markdown(
-            f"""<div style="font-size:16px; color:#555;">
-            <b>{int(j_pct)}%</b> | Inversión: <b>€ {formatear_monto(j_costo)}</b>
+            f"""<div style="font-size:16px; color:#FFD700; font-weight:bold;">
+            {int(j_pct)}% | Inversión: € {formatear_monto(j_costo)}
             </div>""", 
             unsafe_allow_html=True
         )
         
         pts_365 = col_input.number_input(f"Score 365", 1.0, 10.0, 6.4, step=0.1, key=f"score_{v_key}")
         balance = calcular_balance_fecha(pts_365, j_costo)
-        color = "green" if pts_365 >= 6.6 else "red" if pts_365 <= 6.3 else "gray"
-        col_input.markdown(f"Resultado: :{color}[€ {formatear_monto(balance)}]")
+        color_res = "green" if pts_365 >= 6.6 else "red" if pts_365 <= 6.3 else "gray"
+        col_input.markdown(f"Resultado: :{color_res}[€ {formatear_monto(balance)}]")
         
         with col_ops:
             confirmar = st.checkbox("Confirmar acción", key=f"check_{v_key}")
