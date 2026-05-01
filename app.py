@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v35.db'
+DB_NAME = 'agencia_global_v37.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -63,9 +63,7 @@ def calcular_cambio_prestigio(pts):
 
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="World Transfer Market", layout="wide")
-
-if 'version' not in st.session_state: 
-    st.session_state.version = 0
+if 'version' not in st.session_state: st.session_state.version = 0
 
 st.subheader("🌎 World Transfer Market")
 
@@ -102,38 +100,28 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
                 st.session_state.version += 1
                 st.rerun()
 
-# --- 4. SCOUTING CON PROTECCIÓN ANTI-DUPLICADOS ---
+# --- 4. SCOUTING ---
 df_oficial = cargar_datos_completos_google()
 with st.expander("🔍 Scouting y Co-propiedad"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
         seleccion = c1.selectbox("Jugador:", options=[""] + df_oficial['Display'].tolist(), key=f"sel_{st.session_state.version}")
-        
         if seleccion:
             dj = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nom = dj.iloc[0]
-            
-            # NUEVA VERIFICACIÓN: ¿Ya tengo a este jugador?
             existe = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
-            
             if existe:
-                st.warning(f"⚠️ Ya tienes un contrato activo con **{nom}**. Véndelo antes para adquirir un nuevo porcentaje.")
+                st.warning(f"⚠️ Ya tienes a {nom} en tu cartera.")
             else:
                 vendido = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
                 disp = 100 - (vendido[0][0] if vendido[0][0] else 0)
-                
-                if disp <= 0: 
-                    st.error("🚫 Ficha agotada por otros agentes.")
-                else:
-                    st.info(f"📊 Disponible en el mercado: {int(disp)}%")
-                    valor_base = int(dj['ValorNum'])
+                if disp > 0:
+                    st.info(f"📊 Disponible: {int(disp)}%")
                     opciones = [p for p in [25, 50, 75, 100] if p <= disp]
-                    
                     if opciones:
                         pct = c2.select_slider("Porcentaje:", opciones, key=f"pct_{st.session_state.version}")
-                        costo = (valor_base * pct) / 100
+                        costo = (int(dj['ValorNum']) * pct) / 100
                         st.write(f"Inversión: **€ {formatear_total(costo)}**")
-                        
                         if st.button("CERRAR TRATO", type="primary") and presupuesto >= costo:
                             ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
                                         (u_id, nom, pct, costo, dj.iloc[1]), commit=True)
@@ -144,9 +132,6 @@ with st.expander("🔍 Scouting y Co-propiedad"):
 # --- 5. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Mis Jugadores Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
-
-if not cartera:
-    st.caption("No tienes jugadores en tu cartera.")
 
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     v_key = f"v{st.session_state.version}_{j_id}"
@@ -173,3 +158,18 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_costo*0.99, u_id), commit=True)
                 st.session_state.version += 1
                 st.rerun()
+
+# --- 6. RANKING DE AGENTES (POR REPUTACIÓN) ---
+st.divider()
+with st.expander("🏆 Ranking de Reputación"):
+    usuarios_raw = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios")
+    
+    # Crear DataFrame y ordenar estrictamente por prestigio
+    df_ranking = pd.DataFrame(usuarios_raw, columns=['Agente', 'Reputación (pts)', 'Presupuesto'])
+    df_ranking = df_ranking.sort_values(by='Reputación (pts)', ascending=False).reset_index(drop=True)
+    df_ranking.index += 1 # Posición 1, 2, 3...
+    
+    # Formatear la columna de Presupuesto para que se vea bien en la tabla
+    df_ranking['Presupuesto'] = df_ranking['Presupuesto'].apply(lambda x: f"€ {formatear_total(x)}")
+    
+    st.table(df_ranking)
