@@ -157,8 +157,13 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         bal = calcular_balance_fecha(pts, j_costo)
         col_input.markdown(f"Resultado: :{'green' if pts>=6.6 else 'red' if pts<=6.3 else 'gray'}[€ {formatear_total(bal)}]")
         
-        with col_ops:
+       with col_ops:
             conf = st.checkbox("Confirmar", key=f"check_{v_key}", value=False)
+            
+            # Calculamos el valor de venta (99% de la inversión)
+            valor_venta = j_costo * 0.99
+            texto_venta = f"VENDER (€ {formatear_total(valor_venta)})"
+            
             c_c1, c_c2 = st.columns(2)
             if c_c1.button("CARGAR", key=f"btn_r_{v_key}", type="primary", disabled=not conf, use_container_width=True):
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
@@ -168,15 +173,15 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
                                 (u_id, f"Rendimiento {j_nom}", bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                 st.session_state.version += 1
                 st.rerun()
-            if c_c2.button("VENDER", key=f"btn_v_{v_key}", disabled=not conf, use_container_width=True):
-                monto_venta = j_costo * 0.99
+            
+            # El botón ahora muestra dinámicamente el precio
+            if c_c2.button(texto_venta, key=f"btn_v_{v_key}", disabled=not conf, use_container_width=True):
                 ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                            (u_id, f"Venta {int(j_pct)}% {j_nom}", monto_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                            (u_id, f"Venta {int(j_pct)}% {j_nom}", valor_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                 ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_venta, u_id), commit=True)
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_venta, u_id), commit=True)
                 st.session_state.version += 1
                 st.rerun()
-
 # --- 6. RANKING Y HISTORIAL ---
 st.divider()
 c_rank, c_hist = st.columns(2)
