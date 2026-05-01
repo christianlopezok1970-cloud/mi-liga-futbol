@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v32.db'
+DB_NAME = 'agencia_global_v33.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -13,7 +13,6 @@ def ejecutar_db(query, params=(), commit=False):
         if commit: conn.commit()
         return c.fetchall()
 
-# Formateo abreviado (para listas y etiquetas pequeñas)
 def formatear_abreviado(monto):
     try:
         monto = float(monto)
@@ -22,10 +21,8 @@ def formatear_abreviado(monto):
         return f"{monto:.0f}"
     except: return "0"
 
-# Formateo total (para la Caja Global)
 def formatear_total(monto):
-    try:
-        return f"{int(monto):,}".replace(',', '.')
+    try: return f"{int(monto):,}".replace(',', '.')
     except: return "0"
 
 @st.cache_data(ttl=300)
@@ -66,7 +63,10 @@ def calcular_cambio_prestigio(pts):
 
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="World Transfer Market", layout="wide")
-if 'version' not in st.session_state: st.session_state.version = 0
+
+# Usamos la versión para forzar el refresco de los widgets (limpiar checkboxes)
+if 'version' not in st.session_state: 
+    st.session_state.version = 0
 
 st.subheader("🌎 World Transfer Market")
 
@@ -84,7 +84,6 @@ u_id, presupuesto, prestigio = datos[0]
 
 # --- SIDEBAR ---
 st.sidebar.markdown(f"### Agente: {manager}")
-# CAJA TOTAL CON TODOS LOS CEROS
 st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
@@ -93,6 +92,7 @@ if prestigio >= 1:
     with st.sidebar.popover("💰 Pedir Crédito"):
         if st.button("CONFIRMAR CRÉDITO (€ 150.000)"):
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 150000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
+            st.session_state.version += 1 # Incrementa versión para resetear la UI
             st.rerun()
 
 st.sidebar.divider()
@@ -102,6 +102,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
         if st.button("REINICIAR") and clave == "BORRAR":
             ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
             ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
+            st.session_state.version += 1
             st.rerun()
 
 # --- 4. SCOUTING ---
@@ -129,6 +130,7 @@ with st.expander("🔍 Scouting y Co-propiedad"):
                         ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
                                     (u_id, nom, pct, costo, dj.iloc[1]), commit=True)
                         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo, u_id), commit=True)
+                        st.session_state.version += 1
                         st.rerun()
 
 # --- 5. PANEL DE ACTIVOS ---
@@ -136,22 +138,31 @@ st.markdown("##### 📋 Mis Jugadores Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
+    # Usamos la versión de session_state en la key para que el checkbox se desmarque solo al recargar
+    v_key = f"v{st.session_state.version}_{j_id}"
+    
     with st.container(border=True):
         col_info, col_input, col_ops = st.columns([2, 2, 2])
         col_info.subheader(j_nom)
         col_info.write(f"🌍 {j_club}")
         col_info.markdown(f'<div style="font-size:16px; color:#FFD700; font-weight:bold;">{int(j_pct)}% | Inversión: € {formatear_total(j_costo)}</div>', unsafe_allow_html=True)
         
-        pts = col_input.number_input(f"Score", 1.0, 10.0, 6.4, 0.1, key=f"s_{j_id}")
+        pts = col_input.number_input(f"Score", 1.0, 10.0, 6.4, 0.1, key=f"score_{v_key}")
         bal = calcular_balance_fecha(pts, j_costo)
         col_input.markdown(f"Resultado: :{'green' if pts>=6.6 else 'red' if pts<=6.3 else 'gray'}[€ {formatear_total(bal)}]")
         
         with col_ops:
-            conf = st.checkbox("Confirmar", key=f"c_{j_id}")
-            if st.button("CARGAR", key=f"r_{j_id}", type="primary", disabled=not conf):
+            conf = st.checkbox("Confirmar", key=f"check_{v_key}")
+            
+            # Botón CARGAR
+            if st.button("CARGAR", key=f"btn_r_{v_key}", type="primary", disabled=not conf):
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", (bal, calcular_cambio_prestigio(pts), u_id), commit=True)
+                st.session_state.version += 1 # Esto cambia la key de todos los widgets y los "limpia"
                 st.rerun()
-            if st.button(f"VENDER (99%)", key=f"v_{j_id}", disabled=not conf):
+            
+            # Botón VENDER
+            if st.button(f"VENDER (99%)", key=f"btn_v_{v_key}", disabled=not conf):
                 ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_costo*0.99, u_id), commit=True)
+                st.session_state.version += 1
                 st.rerun()
