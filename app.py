@@ -37,11 +37,14 @@ def cargar_datos_completos_google():
                 return int(''.join(filter(str.isdigit, s)))
             except: return 1000000
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
-        df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 2] + ") - € " + df['ValorNum'].apply(formatear_abreviado)
+        
+        # AJUSTE AQUÍ: Se añade el club al final de la cadena de texto[cite: 2]
+        df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 2] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 1] + "]"
+        
         return df
     except: return pd.DataFrame()
 
-# Creación de tablas según código fuente[cite: 2]
+# Tablas[cite: 2]
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
@@ -50,7 +53,7 @@ ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera
 ejecutar_db('''CREATE TABLE IF NOT EXISTS historial 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, detalle TEXT, monto REAL, fecha TEXT)''', commit=True)
 
-# --- 2. LÓGICA DE PRESTIGIO Y BALANCE[cite: 2] ---
+# --- 2. LÓGICA ---
 def calcular_balance_fecha(pts, costo):
     pts = round(float(pts), 1)
     if pts >= 6.6: return int(costo * ((pts - 6.5) * 10 / 100))
@@ -77,7 +80,6 @@ if not manager:
 
 datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
 if not datos:
-    # Valores iniciales de 2M y 10 pts[cite: 2]
     ejecutar_db("INSERT INTO usuarios (nombre, presupuesto, prestigio) VALUES (?, 2000000, 10)", (manager,), commit=True)
     st.rerun()
 
@@ -166,7 +168,6 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
                 st.session_state.version += 1
                 st.rerun()
             if c_c2.button("VENDER", key=f"btn_v_{v_key}", disabled=not conf, use_container_width=True):
-                # Descuento del 1% por venta[cite: 2]
                 monto_venta = j_costo * 0.99
                 ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
                             (u_id, f"Venta {int(j_pct)}% {j_nom}", monto_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
