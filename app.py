@@ -2,7 +2,7 @@ import streamlit as st
 import sqlite3
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v15.db'
+DB_NAME = 'agencia_global_v16.db'
 
 def ejecutar_db(query, params=(), commit=False):
     with sqlite3.connect(DB_NAME, check_same_thread=False) as conn:
@@ -68,6 +68,7 @@ st.sidebar.metric("Caja Global", f"€ {formatear_monto(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
 st.sidebar.divider()
+# Préstamo de 150k
 if prestigio >= 1:
     with st.sidebar.popover("💰 Pedir Crédito"):
         st.write("Solicitar **€ 150.000**")
@@ -77,25 +78,34 @@ if prestigio >= 1:
             st.session_state.version += 1
             st.rerun()
 
-# --- 4. SCOUTING (CON LISTADO DE JUGADORES) ---
-# Obtenemos la lista de jugadores actuales para el buscador
+# --- BOTÓN DE RESET CON SEGURIDAD ---
+st.sidebar.divider()
+bloqueo_seguridad = st.sidebar.toggle("🔒 Bloquear Reset", value=True)
+
+if not bloqueo_seguridad:
+    with st.sidebar.expander("⚠️ ZONA DE PELIGRO"):
+        st.write("Para reiniciar tu carrera, escribe la palabra clave:")
+        clave = st.text_input("Palabra clave:", key="reset_key").upper()
+        if st.button("RESETEAR TODO EL JUEGO", type="secondary", disabled=(clave != "BORRAR")):
+            ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
+            ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
+            st.session_state.version += 1
+            st.rerun()
+
+# --- 4. SCOUTING ---
 lista_jugadores_db = ejecutar_db("SELECT DISTINCT nombre_jugador FROM cartera WHERE usuario_id = ?", (u_id,))
 opciones_jugadores = [j[0] for j in lista_jugadores_db]
 
 with st.expander("🔍 Scouting"):
     c1, c2 = st.columns(2)
     
-    # Campo con sugerencias de jugadores ya subidos
     nombre_j = c1.selectbox("Jugador (selecciona o escribe):", 
                              options=[""] + opciones_jugadores, 
-                             index=0, 
-                             help="Puedes elegir uno existente o escribir uno nuevo",
-                             placeholder="Escribe el nombre del jugador...",
-                             label_visibility="visible")
+                             index=0,
+                             placeholder="Selecciona uno existente...")
     
-    # Si el selectbox está vacío, permitimos entrada manual
     if nombre_j == "":
-        nombre_j = c1.text_input("Nombre del nuevo jugador:")
+        nombre_j = c1.text_input("O escribe un nuevo nombre:")
 
     club_j = c1.text_input("Club:")
     liga_j = c1.text_input("Liga:")
