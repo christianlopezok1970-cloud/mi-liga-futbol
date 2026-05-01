@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v34.db'
+DB_NAME = 'agencia_global_v35.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -102,74 +102,74 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
                 st.session_state.version += 1
                 st.rerun()
 
-# --- 4. SCOUTING ---
+# --- 4. SCOUTING CON PROTECCIÓN ANTI-DUPLICADOS ---
 df_oficial = cargar_datos_completos_google()
 with st.expander("🔍 Scouting y Co-propiedad"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
         seleccion = c1.selectbox("Jugador:", options=[""] + df_oficial['Display'].tolist(), key=f"sel_{st.session_state.version}")
+        
         if seleccion:
             dj = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nom = dj.iloc[0]
-            vendido = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
-            disp = 100 - (vendido[0][0] if vendido[0][0] else 0)
             
-            if disp <= 0: st.error("🚫 Ficha agotada.")
+            # NUEVA VERIFICACIÓN: ¿Ya tengo a este jugador?
+            existe = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
+            
+            if existe:
+                st.warning(f"⚠️ Ya tienes un contrato activo con **{nom}**. Véndelo antes para adquirir un nuevo porcentaje.")
             else:
-                st.info(f"📊 Disponible: {int(disp)}%")
-                valor_base = int(dj['ValorNum'])
-                opciones = [p for p in [25, 50, 75, 100] if p <= disp]
-                if opciones:
-                    pct = c2.select_slider("Porcentaje:", opciones, key=f"pct_{st.session_state.version}")
-                    costo = (valor_base * pct) / 100
-                    st.write(f"Inversión: **€ {formatear_total(costo)}**")
-                    if st.button("CERRAR TRATO", type="primary") and presupuesto >= costo:
-                        ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
-                                    (u_id, nom, pct, costo, dj.iloc[1]), commit=True)
-                        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo, u_id), commit=True)
-                        st.session_state.version += 1
-                        st.rerun()
+                vendido = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
+                disp = 100 - (vendido[0][0] if vendido[0][0] else 0)
+                
+                if disp <= 0: 
+                    st.error("🚫 Ficha agotada por otros agentes.")
+                else:
+                    st.info(f"📊 Disponible en el mercado: {int(disp)}%")
+                    valor_base = int(dj['ValorNum'])
+                    opciones = [p for p in [25, 50, 75, 100] if p <= disp]
+                    
+                    if opciones:
+                        pct = c2.select_slider("Porcentaje:", opciones, key=f"pct_{st.session_state.version}")
+                        costo = (valor_base * pct) / 100
+                        st.write(f"Inversión: **€ {formatear_total(costo)}**")
+                        
+                        if st.button("CERRAR TRATO", type="primary") and presupuesto >= costo:
+                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
+                                        (u_id, nom, pct, costo, dj.iloc[1]), commit=True)
+                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo, u_id), commit=True)
+                            st.session_state.version += 1
+                            st.rerun()
 
-# --- 5. PANEL DE ACTIVOS (ANTIDUPLICADOS) ---
+# --- 5. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Mis Jugadores Representados")
-# Limpiamos la vista antes de dibujar
-contenedor_cartera = st.container()
+cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 
-with contenedor_cartera:
-    # Consulta fresca de la cartera
-    cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
-    
-    if not cartera:
-        st.caption("No tienes jugadores en tu cartera.")
-    
-    for j_id, j_nom, j_pct, j_costo, j_club in cartera:
-        # La KEY debe ser única por ID de base de datos y versión de sesión
-        v_key = f"v{st.session_state.version}_{j_id}"
+if not cartera:
+    st.caption("No tienes jugadores en tu cartera.")
+
+for j_id, j_nom, j_pct, j_costo, j_club in cartera:
+    v_key = f"v{st.session_state.version}_{j_id}"
+    with st.container(border=True):
+        col_info, col_input, col_ops = st.columns([2, 2, 2])
+        col_info.subheader(j_nom)
+        col_info.write(f"🌍 {j_club}")
+        col_info.markdown(f'<div style="font-size:16px; color:#FFD700; font-weight:bold;">{int(j_pct)}% | Inversión: € {formatear_total(j_costo)}</div>', unsafe_allow_html=True)
         
-        with st.container(border=True):
-            col_info, col_input, col_ops = st.columns([2, 2, 2])
-            
-            col_info.subheader(j_nom)
-            col_info.write(f"🌍 {j_club}")
-            col_info.markdown(f'<div style="font-size:16px; color:#FFD700; font-weight:bold;">{int(j_pct)}% | Inversión: € {formatear_total(j_costo)}</div>', unsafe_allow_html=True)
-            
-            pts = col_input.number_input(f"Score", 1.0, 10.0, 6.4, 0.1, key=f"score_{v_key}")
-            bal = calcular_balance_fecha(pts, j_costo)
-            col_input.markdown(f"Resultado: :{'green' if pts>=6.6 else 'red' if pts<=6.3 else 'gray'}[€ {formatear_total(bal)}]")
-            
-            with col_ops:
-                # El checkbox ahora se resetea siempre por el v_key
-                conf = st.checkbox("Confirmar", key=f"check_{v_key}", value=False)
-                
-                c_c1, c_c2 = st.columns(2)
-                if c_c1.button("CARGAR", key=f"btn_r_{v_key}", type="primary", disabled=not conf, use_container_width=True):
-                    ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
-                                (bal, calcular_cambio_prestigio(pts), u_id), commit=True)
-                    st.session_state.version += 1
-                    st.rerun()
-                
-                if c_c2.button("VENDER", key=f"btn_v_{v_key}", disabled=not conf, use_container_width=True):
-                    ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                    ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_costo*0.99, u_id), commit=True)
-                    st.session_state.version += 1
-                    st.rerun()
+        pts = col_input.number_input(f"Score", 1.0, 10.0, 6.4, 0.1, key=f"score_{v_key}")
+        bal = calcular_balance_fecha(pts, j_costo)
+        col_input.markdown(f"Resultado: :{'green' if pts>=6.6 else 'red' if pts<=6.3 else 'gray'}[€ {formatear_total(bal)}]")
+        
+        with col_ops:
+            conf = st.checkbox("Confirmar", key=f"check_{v_key}", value=False)
+            c_c1, c_c2 = st.columns(2)
+            if c_c1.button("CARGAR", key=f"btn_r_{v_key}", type="primary", disabled=not conf, use_container_width=True):
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
+                            (bal, calcular_cambio_prestigio(pts), u_id), commit=True)
+                st.session_state.version += 1
+                st.rerun()
+            if c_c2.button("VENDER", key=f"btn_v_{v_key}", disabled=not conf, use_container_width=True):
+                ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_costo*0.99, u_id), commit=True)
+                st.session_state.version += 1
+                st.rerun()
