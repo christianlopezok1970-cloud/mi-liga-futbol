@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v27.db'
+DB_NAME = 'agencia_global_v28.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -54,15 +54,23 @@ def calcular_balance_fecha(puntaje, costo_proporcional):
         return int(costo_proporcional * (porcentaje_perdida / 100))
     return 0
 
+def calcular_cambio_prestigio(puntaje):
+    p = round(float(puntaje), 1)
+    if p < 5.9: return -2
+    elif 6.0 <= p <= 6.4: return -1
+    elif 7.0 <= p <= 7.9: return 1
+    elif p >= 8.0: return 2
+    return 0
+
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="World Transfer Market", layout="wide")
 if 'version' not in st.session_state: st.session_state.version = 0
 
-st.subheader("🌎 World Transfer Market - Co-propiedad")
+st.subheader("🌎 World Transfer Market")
 
 manager = st.sidebar.text_input("Nombre del Agente:").strip()
 if not manager:
-    st.info("👋 Ingresa tu nombre.")
+    st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
 datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
@@ -74,10 +82,10 @@ u_id, presupuesto, prestigio = datos[0]
 st.sidebar.metric("Caja Global", f"€ {formatear_monto(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
-# --- 4. SCOUTING MULTI-AGENTE ---
+# --- 4. SCOUTING ---
 df_oficial = cargar_datos_completos_google()
 
-with st.expander("🔍 Scouting"):
+with st.expander("🔍 Scouting y Co-propiedad"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
         seleccion = c1.selectbox("Jugador Autorizado:", options=[""] + df_oficial['Display'].tolist())
@@ -86,54 +94,68 @@ with st.expander("🔍 Scouting"):
             datos_j = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nombre_real = datos_j.iloc[0]
             
-            # --- CÁLCULO DE PORCENTAJE DISPONIBLE ---
+            # Disponibilidad
             vendido = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nombre_real,))
             total_vendido = vendido[0][0] if vendido[0][0] else 0
             disponible = 100 - total_vendido
             
             if disponible <= 0:
-                st.error(f"🚫 Ficha agotada. El 100% de {nombre_real} ya pertenece a otros agentes.")
-                compra_bloqueada = True
+                st.error(f"🚫 Ficha agotada para {nombre_real}.")
             else:
-                st.info(f"📊 Ficha disponible en el mercado: **{int(disponible)}%**")
-                compra_bloqueada = False
-
+                st.info(f"📊 Disponible para compra: **{int(disponible)}%**")
                 club_j = c1.text_input("Club:", value=datos_j.iloc[1])
                 valor_100 = c2.number_input("Valor 100%:", min_value=0, value=int(datos_j['ValorNum']), step=50000)
                 
-                # Solo permitimos opciones que no superen lo disponible
                 opciones_posibles = [p for p in [25, 50, 75, 100] if p <= disponible]
                 
-                if not opciones_posibles:
-                    st.warning("No puedes comprar el mínimo (25%) porque queda muy poco disponible.")
-                    compra_bloqueada = True
-                    pct_compra = 0
-                else:
-                    pct_compra = c2.select_slider("Adquirir porcentaje:", options=opciones_posibles)
+                if opciones_posibles:
+                    pct_compra = c2.select_slider("Porcentaje a adquirir:", options=opciones_posibles)
                     costo_final = (valor_100 * pct_compra) / 100
-                    st.write(f"Inversión: **€ {formatear_monto(costo_final)}**")
+                    st.write(f"Costo de la operación: **€ {formatear_monto(costo_final)}**")
                     
-                    if st.button("CERRAR TRATO", use_container_width=True, type="primary", 
-                                 disabled=(presupuesto < costo_final or compra_bloqueada)):
+                    if st.button("CERRAR TRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final)):
                         ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
                                     (u_id, nombre_real, pct_compra, costo_final, club_j), commit=True)
                         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_final, u_id), commit=True)
+                        st.session_state.version += 1
                         st.rerun()
 
-# --- 5. PANEL DE ACTIVOS ---
+# --- 5. PANEL DE ACTIVOS CON SEGURIDAD Y VENTA ---
 st.markdown("##### 📋 Mis Jugadores Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         col_info, col_input, col_ops = st.columns([2, 2, 2])
+        v_key = f"{st.session_state.version}_{j_id}"
+        
+        # Info del Jugador
         col_info.subheader(j_nom)
-        col_info.caption(f"{int(j_pct)}% de la ficha | € {formatear_monto(j_costo)}")
+        col_info.write(f"🌍 {j_club}")
+        col_info.caption(f"{int(j_pct)}% | Costo: € {formatear_monto(j_costo)}")
         
-        pts_365 = col_input.number_input(f"Score", 1.0, 10.0, 6.4, step=0.1, key=f"p_{j_id}")
+        # Input de Score y Cálculo
+        pts_365 = col_input.number_input(f"Score 365", 1.0, 10.0, 6.4, step=0.1, key=f"score_{v_key}")
         balance = calcular_balance_fecha(pts_365, j_costo)
-        col_input.write(f"Rendimiento: € {formatear_monto(balance)}")
+        color = "green" if pts_365 >= 6.6 else "red" if pts_365 <= 6.3 else "gray"
+        col_input.markdown(f"Resultado: :{color}[€ {formatear_monto(balance)}]")
         
-        if col_ops.button("CARGAR RESULTADO", key=f"btn_{j_id}"):
-            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (balance, u_id), commit=True)
-            st.rerun()
+        # Operaciones con Seguridad
+        with col_ops:
+            confirmar = st.checkbox("Confirmar acción", key=f"check_{v_key}")
+            
+            # Botón Cargar Resultado
+            if st.button("CARGAR RESULTADO", key=f"res_{v_key}", type="primary", disabled=not confirmar):
+                cambio_rep = calcular_cambio_prestigio(pts_365)
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
+                            (balance, cambio_rep, u_id), commit=True)
+                st.session_state.version += 1
+                st.rerun()
+            
+            # Botón Vender (Pierde 1%)
+            valor_recupero = j_costo * 0.99
+            if st.button(f"VENDER (REC. € {formatear_monto(valor_recupero)})", key=f"sell_{v_key}", disabled=not confirmar):
+                ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_recupero, u_id), commit=True)
+                st.session_state.version += 1
+                st.rerun()
