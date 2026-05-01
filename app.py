@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v30.db'
+DB_NAME = 'agencia_global_v31.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -58,7 +58,7 @@ def calcular_cambio_prestigio(puntaje):
     p = round(float(puntaje), 1)
     if p < 5.9: return -2
     elif 6.0 <= p <= 6.4: return -1
-    elif 7.0 <= p <= 7.9: return 1
+    elif 7.0 <= p <= 7.9: return 0
     elif p >= 8.0: return 2
     return 0
 
@@ -79,8 +79,36 @@ if not datos:
     st.rerun()
 
 u_id, presupuesto, prestigio = datos[0]
+
+# --- SIDEBAR (SISTEMA FINANCIERO Y RESET) ---
+st.sidebar.markdown(f"### Agente: {manager}")
 st.sidebar.metric("Caja Global", f"€ {formatear_monto(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
+
+st.sidebar.divider()
+
+# Botón de Préstamo
+if prestigio >= 1:
+    with st.sidebar.popover("💰 Pedir Crédito"):
+        st.write("Solicitar **€ 150.000**")
+        st.caption("Efecto: -1 punto de Reputación")
+        if st.button("CONFIRMAR CRÉDITO"):
+            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 150000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
+            st.session_state.version += 1
+            st.rerun()
+
+st.sidebar.divider()
+
+# Reset Seguro
+bloqueo_reset = st.sidebar.toggle("🔒 Bloquear Reset", value=True)
+if not bloqueo_reset:
+    with st.sidebar.expander("⚠️ ZONA DE PELIGRO"):
+        st.write("Esto borrará tu cartera y reiniciará tus stats.")
+        clave = st.text_input("Escribe 'BORRAR' para confirmar:").upper()
+        if st.button("REINICIAR CUENTA", disabled=(clave != "BORRAR")):
+            ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
+            ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
+            st.rerun()
 
 # --- 4. SCOUTING ---
 df_oficial = cargar_datos_completos_google()
@@ -131,7 +159,7 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         col_info.subheader(j_nom)
         col_info.write(f"🌍 {j_club}")
         
-        # --- DATO EN AMARILLO Y MÁS GRANDE ---
+        # Dato en amarillo resaltado
         col_info.markdown(
             f"""<div style="font-size:16px; color:#FFD700; font-weight:bold;">
             {int(j_pct)}% | Inversión: € {formatear_monto(j_costo)}
