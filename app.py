@@ -62,9 +62,10 @@ def calcular_balance_fecha(pts, costo):
 
 def calcular_cambio_prestigio(pts):
     p = round(float(pts), 1)
-    if p < 5.9: return -2
-    elif 6.0 <= p <= 6.4: return -1
-    elif p >= 8.0: return 2
+    if p >= 7.5: return 2      # Excelente: Ganas 2 pts
+    if p >= 6.6: return 1      # Bueno: Ganas 1 pt[cite: 2]
+    if p <= 5.9: return -2     # Malo: Pierdes 2 pts[cite: 2]
+    if p <= 6.5: return -1     # Regular: Pierdes 1 pt[cite: 2]
     return 0
 
 # --- 3. INTERFAZ ---
