@@ -2,7 +2,7 @@ import streamlit as st
 import sqlite3
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v14.db'
+DB_NAME = 'agencia_global_v15.db'
 
 def ejecutar_db(query, params=(), commit=False):
     with sqlite3.connect(DB_NAME, check_same_thread=False) as conn:
@@ -17,9 +17,7 @@ ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre_jugador TEXT, 
               porcentaje REAL, costo_compra REAL, club TEXT, liga TEXT)''', commit=True)
 
-# --- 2. LÓGICA FINANCIERA Y REPUTACIÓN ---
-
-# Formato de monto total (separador de miles)
+# --- 2. LÓGICA FINANCIERA ---
 def formatear_monto(monto):
     return f"{int(monto):,}".replace(",", ".")
 
@@ -36,16 +34,11 @@ def calcular_balance_fecha(puntaje, costo_proporcional):
 
 def calcular_cambio_prestigio(puntaje):
     p = round(float(puntaje), 1)
-    if p < 5.9:
-        return -2
-    elif 6.0 <= p <= 6.4:
-        return -1
-    elif 6.5 <= p <= 6.9:
-        return 0
-    elif 7.0 <= p <= 7.9:
-        return 1
-    elif p >= 8.0:
-        return 2
+    if p < 5.9: return -2
+    elif 6.0 <= p <= 6.4: return -1
+    elif 6.5 <= p <= 6.9: return 0
+    elif 7.0 <= p <= 7.9: return 1
+    elif p >= 8.0: return 2
     return 0
 
 # --- 3. INTERFAZ ---
@@ -62,9 +55,11 @@ if not manager:
     st.info("👋 Ingresa tu nombre en la barra lateral.")
     st.stop()
 
-# Registro/Carga (1M inicial y 40 de prestigio)
-ejecutar_db("INSERT OR IGNORE INTO usuarios (nombre, presupuesto, prestigio) VALUES (?, 1000000, 40)", (manager,), commit=True)
 datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
+if not datos:
+    ejecutar_db("INSERT INTO usuarios (nombre, presupuesto, prestigio) VALUES (?, 1000000, 40)", (manager,), commit=True)
+    st.rerun()
+
 u_id, presupuesto, prestigio = datos[0]
 
 # --- SIDEBAR ---
@@ -73,7 +68,6 @@ st.sidebar.metric("Caja Global", f"€ {formatear_monto(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
 st.sidebar.divider()
-# Préstamo corregido: 150k x 1 punto
 if prestigio >= 1:
     with st.sidebar.popover("💰 Pedir Crédito"):
         st.write("Solicitar **€ 150.000**")
@@ -82,33 +76,37 @@ if prestigio >= 1:
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 150000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
             st.session_state.version += 1
             st.rerun()
-else:
-    st.sidebar.error("Sin reputación para créditos.")
 
-# --- SECCIÓN DE RESET COMENTADA (HARDCORE MODE) ---
-# st.sidebar.divider()
-# with st.sidebar.expander("⚠️ Zona de Peligro"):
-#     st.write("Escribe BORRAR para resetear:")
-#     clave = st.text_input("Palabra clave", key="reset_key").upper()
-#     if st.button("RESETEAR TODO EL JUEGO", type="secondary", disabled=(clave != "BORRAR")):
-#         ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
-#         ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
-#         st.session_state.version += 1
-#         st.rerun()
+# --- 4. SCOUTING (CON LISTADO DE JUGADORES) ---
+# Obtenemos la lista de jugadores actuales para el buscador
+lista_jugadores_db = ejecutar_db("SELECT DISTINCT nombre_jugador FROM cartera WHERE usuario_id = ?", (u_id,))
+opciones_jugadores = [j[0] for j in lista_jugadores_db]
 
-# --- 4. SCOUTING ---
-with st.expander("🔍 Scouting Global"):
+with st.expander("🔍 Scouting"):
     c1, c2 = st.columns(2)
-    nombre_j = c1.text_input("Jugador:")
+    
+    # Campo con sugerencias de jugadores ya subidos
+    nombre_j = c1.selectbox("Jugador (selecciona o escribe):", 
+                             options=[""] + opciones_jugadores, 
+                             index=0, 
+                             help="Puedes elegir uno existente o escribir uno nuevo",
+                             placeholder="Escribe el nombre del jugador...",
+                             label_visibility="visible")
+    
+    # Si el selectbox está vacío, permitimos entrada manual
+    if nombre_j == "":
+        nombre_j = c1.text_input("Nombre del nuevo jugador:")
+
     club_j = c1.text_input("Club:")
     liga_j = c1.text_input("Liga:")
-    valor_100 = c2.number_input("Valor 100%:", min_value=10000, step=50000, value=1000000)
+    
+    valor_100 = c2.number_input("Valor 100%:", min_value=0, step=50000, value=1000000)
     pct_compra = c2.slider("% adquirido:", 5, 100, 10)
     
     costo_final = (valor_100 * pct_compra) / 100
     st.write(f"Inversión total: **€ {formatear_monto(costo_final)}**")
     
-    if st.button("CERRAR TRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final)):
+    if st.button("CERRAR TRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final or nombre_j == "")):
         ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club, liga) VALUES (?,?,?,?,?,?)",
                     (u_id, nombre_j, pct_compra, costo_final, club_j, liga_j), commit=True)
         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_final, u_id), commit=True)
@@ -147,7 +145,6 @@ else:
                     st.error(f"⚠️ Pérdida por venta: € {formatear_monto(perdida_venta)}")
 
                 if st.button("CARGAR RENDIMIENTO", key=f"btn_p_{v_key}", disabled=not confirmar, use_container_width=True, type="primary"):
-                    # Aplicamos la nueva escala de prestigio
                     cambio_rep = calcular_cambio_prestigio(pts_365)
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
                                 (balance, cambio_rep, u_id), commit=True)
