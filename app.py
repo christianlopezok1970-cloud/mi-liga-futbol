@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS Y LISTADO EXTERNO ---
-DB_NAME = 'agencia_global_v21.db'
+DB_NAME = 'agencia_global_v22.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -13,14 +13,42 @@ def ejecutar_db(query, params=(), commit=False):
         if commit: conn.commit()
         return c.fetchall()
 
+# --- 2. LÓGICA DE FORMATO RESUMIDO ---
+def formatear_monto(monto):
+    try:
+        monto = float(monto)
+        if monto >= 1_000_000:
+            return f"{monto / 1_000_000:.1f}M".replace('.', ',')
+        elif monto >= 1_000:
+            return f"{monto / 1_000:.0f}K"
+        return f"{monto:.0f}"
+    except:
+        return "0"
+
 @st.cache_data(ttl=300)
 def cargar_datos_completos_google():
     try:
         df = pd.read_csv(SHEET_URL)
         df.columns = [c.strip() for c in df.columns]
+        
+        # Función interna para limpiar y convertir la cotización del Excel a número
+        def limpiar_valor(val):
+            try:
+                s = str(val).replace('.','').replace(',','')
+                return int(''.join(filter(str.isdigit, s)))
+            except:
+                return 1000000
+
+        # Crear la etiqueta combinada: NOMBRE (POS) - € VALOR
+        # Asumiendo columnas: 0:Nombre, 1:Equipo, 2:Pos, 3:Cotización
+        df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
+        df['Display'] = (
+            df.iloc[:, 0] + " (" + df.iloc[:, 2] + ") - € " + 
+            df['ValorNum'].apply(formatear_monto)
+        )
         return df
     except Exception as e:
-        st.error(f"Error cargando base de datos oficial: {e}")
+        st.error(f"Error cargando listado: {e}")
         return pd.DataFrame()
 
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
@@ -29,16 +57,7 @@ ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre_jugador TEXT, 
               porcentaje REAL, costo_compra REAL, club TEXT, liga TEXT)''', commit=True)
 
-# --- 2. LÓGICA FINANCIERA (FORMATO RESUMIDO M/K) ---
-def formatear_monto(monto):
-    monto = float(monto)
-    if monto >= 1_000_000:
-        return f"{monto / 1_000_000:.1f} M".replace('.', ',')
-    elif monto >= 1_000:
-        return f"{monto / 1_000:.0f} K"
-    else:
-        return f"{monto:.0f}"
-
+# --- 3. LÓGICA DE JUEGO ---
 def calcular_balance_fecha(puntaje, costo_proporcional):
     puntaje = round(float(puntaje), 1)
     if puntaje >= 6.6:
@@ -47,8 +66,7 @@ def calcular_balance_fecha(puntaje, costo_proporcional):
     elif puntaje <= 6.3:
         porcentaje_perdida = (puntaje - 6.4) * 10
         return int(costo_proporcional * (porcentaje_perdida / 100))
-    else:
-        return 0
+    return 0
 
 def calcular_cambio_prestigio(puntaje):
     p = round(float(puntaje), 1)
@@ -59,7 +77,7 @@ def calcular_cambio_prestigio(puntaje):
     elif p >= 8.0: return 2
     return 0
 
-# --- 3. INTERFAZ ---
+# --- 4. INTERFAZ ---
 st.set_page_config(page_title="World Transfer Market", layout="wide")
 
 if 'version' not in st.session_state:
@@ -68,7 +86,6 @@ if 'version' not in st.session_state:
 st.subheader("🌎 World Transfer Market")
 
 manager = st.sidebar.text_input("Nombre del Agente:").strip()
-
 if not manager:
     st.info("👋 Ingresa tu nombre en la barra lateral.")
     st.stop()
@@ -103,29 +120,24 @@ if not bloqueo_reset:
         if st.button("BORRAR TODO", disabled=(clave != "BORRAR")):
             ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
             ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
-            st.session_state.version += 1
             st.rerun()
 
-# --- 4. SCOUTING ---
+# --- 5. SCOUTING CON DISPLAY COMBINADO ---
 df_oficial = cargar_datos_completos_google()
 
 with st.expander("🔍 Scouting"):
     if df_oficial.empty:
         st.warning("No se pudo leer el listado.")
     else:
-        df_oficial['Display'] = df_oficial.iloc[:, 0] + " (" + df_oficial.iloc[:, 2] + ")"
         c1, c2 = st.columns(2)
+        # Aquí aparece: Nombre (POS) - € 1,5M
         seleccion = c1.selectbox("Jugador Autorizado:", options=[""] + df_oficial['Display'].tolist())
         
         if seleccion:
             datos_j = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nombre_real = datos_j.iloc[0]
             equipo_sugerido = datos_j.iloc[1]
-            try:
-                cotizacion_raw = str(datos_j.iloc[3]).replace('.','').replace(',','')
-                cotizacion_sugerida = int(''.join(filter(str.isdigit, cotizacion_raw)))
-            except:
-                cotizacion_sugerida = 1000000
+            cotizacion_sugerida = int(datos_j['ValorNum'])
 
             club_j = c1.text_input("Club:", value=equipo_sugerido)
             liga_j = c1.text_input("Liga:")
@@ -134,7 +146,7 @@ with st.expander("🔍 Scouting"):
             pct_compra = c2.slider("% de la ficha:", 5, 100, 10)
             
             costo_final = (valor_100 * pct_compra) / 100
-            st.write(f"Inversión: **€ {formatear_monto(costo_final)}**")
+            st.write(f"Inversión Requerida: **€ {formatear_monto(costo_final)}**")
             
             if st.button("CERRAR TRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final)):
                 ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club, liga) VALUES (?,?,?,?,?,?)",
@@ -143,7 +155,7 @@ with st.expander("🔍 Scouting"):
                 st.session_state.version += 1
                 st.rerun()
 
-# --- 5. PANEL DE ACTIVOS ---
+# --- 6. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Jugadores Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club, liga FROM cartera WHERE usuario_id = ?", (u_id,))
 
