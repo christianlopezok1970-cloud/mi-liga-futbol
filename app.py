@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS Y LISTADO EXTERNO ---
-DB_NAME = 'agencia_global_v24.db'
+DB_NAME = 'agencia_global_v25.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -48,6 +48,7 @@ def cargar_datos_completos_google():
         st.error(f"Error cargando listado: {e}")
         return pd.DataFrame()
 
+# Iniciar Tablas
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
@@ -119,7 +120,7 @@ if not bloqueo_reset:
             ejecutar_db("UPDATE usuarios SET presupuesto = 1000000, prestigio = 40 WHERE id = ?", (u_id,), commit=True)
             st.rerun()
 
-# --- 5. SCOUTING ---
+# --- 5. SCOUTING CON BLOQUEO DE DUPLICADOS ---
 df_oficial = cargar_datos_completos_google()
 
 with st.expander("🔍 Scouting"):
@@ -135,8 +136,16 @@ with st.expander("🔍 Scouting"):
             equipo_sugerido = datos_j.iloc[1]
             cotizacion_sugerida = int(datos_j['ValorNum'])
 
-            club_j = c1.text_input("Club:", value=equipo_sugerido)
+            # --- VALIDACIÓN DE DUPLICADO ---
+            existe = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nombre_real))
             
+            if existe:
+                st.warning(f"⚠️ Ya representas a {nombre_real}. No puedes duplicar el contrato.")
+                compra_bloqueada = True
+            else:
+                compra_bloqueada = False
+
+            club_j = c1.text_input("Club:", value=equipo_sugerido)
             valor_100 = c2.number_input("Valor 100%:", min_value=0, value=cotizacion_sugerida, step=50000)
             
             pct_compra = c2.select_slider(
@@ -148,7 +157,9 @@ with st.expander("🔍 Scouting"):
             costo_final = (valor_100 * pct_compra) / 100
             st.write(f"Inversión Requerida ({pct_compra}%): **€ {formatear_monto(costo_final)}**")
             
-            if st.button("CERRAR TRATO", use_container_width=True, type="primary", disabled=(presupuesto < costo_final)):
+            # El botón se desactiva si ya tienes al jugador o no tienes dinero
+            if st.button("CERRAR TRATO", use_container_width=True, type="primary", 
+                         disabled=(presupuesto < costo_final or compra_bloqueada)):
                 ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
                             (u_id, nombre_real, pct_compra, costo_final, club_j), commit=True)
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_final, u_id), commit=True)
@@ -158,6 +169,9 @@ with st.expander("🔍 Scouting"):
 # --- 6. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Jugadores Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
+
+if not cartera:
+    st.info("Tu cartera está vacía. Busca jugadores en la sección de Scouting.")
 
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
