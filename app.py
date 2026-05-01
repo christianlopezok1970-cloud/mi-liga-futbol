@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS ---
-DB_NAME = 'agencia_global_v28.db'
+DB_NAME = 'agencia_global_v29.db'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
 
 def ejecutar_db(query, params=(), commit=False):
@@ -94,7 +94,6 @@ with st.expander("🔍 Scouting y Co-propiedad"):
             datos_j = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nombre_real = datos_j.iloc[0]
             
-            # Disponibilidad
             vendido = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nombre_real,))
             total_vendido = vendido[0][0] if vendido[0][0] else 0
             disponible = 100 - total_vendido
@@ -120,7 +119,7 @@ with st.expander("🔍 Scouting y Co-propiedad"):
                         st.session_state.version += 1
                         st.rerun()
 
-# --- 5. PANEL DE ACTIVOS CON SEGURIDAD Y VENTA ---
+# --- 5. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Mis Jugadores Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 
@@ -129,22 +128,25 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         col_info, col_input, col_ops = st.columns([2, 2, 2])
         v_key = f"{st.session_state.version}_{j_id}"
         
-        # Info del Jugador
+        # Info del Jugador con tamaño de fuente aumentado
         col_info.subheader(j_nom)
         col_info.write(f"🌍 {j_club}")
-        col_info.caption(f"{int(j_pct)}% | Costo: € {formatear_monto(j_costo)}")
+        # --- CAMBIO AQUÍ: HTML para aumentar tamaño de fuente de datos de ficha ---
+        col_info.markdown(
+            f"""<div style="font-size:16px; color:#555;">
+            <b>{int(j_pct)}%</b> | Inversión: <b>€ {formatear_monto(j_costo)}</b>
+            </div>""", 
+            unsafe_allow_html=True
+        )
         
-        # Input de Score y Cálculo
         pts_365 = col_input.number_input(f"Score 365", 1.0, 10.0, 6.4, step=0.1, key=f"score_{v_key}")
         balance = calcular_balance_fecha(pts_365, j_costo)
         color = "green" if pts_365 >= 6.6 else "red" if pts_365 <= 6.3 else "gray"
         col_input.markdown(f"Resultado: :{color}[€ {formatear_monto(balance)}]")
         
-        # Operaciones con Seguridad
         with col_ops:
             confirmar = st.checkbox("Confirmar acción", key=f"check_{v_key}")
             
-            # Botón Cargar Resultado
             if st.button("CARGAR RESULTADO", key=f"res_{v_key}", type="primary", disabled=not confirmar):
                 cambio_rep = calcular_cambio_prestigio(pts_365)
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
@@ -152,7 +154,6 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
                 st.session_state.version += 1
                 st.rerun()
             
-            # Botón Vender (Pierde 1%)
             valor_recupero = j_costo * 0.99
             if st.button(f"VENDER (REC. € {formatear_monto(valor_recupero)})", key=f"sell_{v_key}", disabled=not confirmar):
                 ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
