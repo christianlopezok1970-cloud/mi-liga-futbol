@@ -69,7 +69,7 @@ def calcular_cambio_prestigio(pts):
     return 0
 
 # --- 3. INTERFAZ ---
-st.set_page_config(page_title="World Transfer Market v40", layout="wide")
+st.set_page_config(page_title="Pro Fútbol Manager v40", layout="wide")
 if 'version' not in st.session_state: st.session_state.version = 0
 
 st.subheader("Pro Fútbol Manager")
@@ -145,7 +145,6 @@ with st.expander("🔍 Scouting "):
 
                     pct = c2.select_slider("Porcentaje a adquirir:", opciones, key=f"pct_{st.session_state.version}")
                     
-                    # LÓGICA OPCIÓN B: 2% Gastos Administrativos sobre el valor TOTAL[cite: 1]
                     costo_ficha = (valor_mercado_total * pct) / 100
                     gastos_admin = valor_mercado_total * 0.02
                     inversion_total = costo_ficha + gastos_admin
@@ -154,29 +153,27 @@ with st.expander("🔍 Scouting "):
                     st.write(f"Gastos Admin (2% del Total): **€ {formatear_total(gastos_admin)}**")
                     st.markdown(f"### Inversión Total: € {formatear_total(inversion_total)}")
                     
-                  if st.button("FICHAR JUGADOR", type="primary"):
-    if presupuesto >= inversion_total:
-        # CAMBIO CLAVE: Guardamos 'costo_ficha' (sin gastos) en la cartera
-        ejecutar_db("""INSERT INTO cartera 
-                       (usuario_id, nombre_jugador, porcentaje, costo_compra, club) 
-                       VALUES (?,?,?,?,?)""",
-                    (u_id, nom, pct, costo_ficha, dj.iloc[2]), commit=True)
-        
-        # El cobro al presupuesto sigue siendo por el 'inversion_total' (ficha + gastos)
-        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", 
-                    (inversion_total, u_id), commit=True)
-        
-        # En el historial registramos el monto total para que el balance cuadre
-        ejecutar_db("""INSERT INTO historial (usuario_id, detalle, monto, fecha) 
-                       VALUES (?,?,?,?)""", 
-                    (u_id, f"Compra {int(pct)}% {nom} (inc. Gastos)", -inversion_total, 
-                     datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-        
-        st.success("✅ Trato cerrado. La comisión se ha cobrado pero no afecta el valor del activo.")
-        st.session_state.version += 1
-        st.rerun()
-    else:
-        st.error("❌ Fondos insuficientes para cubrir la ficha y los gastos administrativos.")
+                    # CORREGIDO: Bloque de botón alineado correctamente
+                    if st.button("FICHAR JUGADOR", type="primary"):
+                        if presupuesto >= inversion_total:
+                            ejecutar_db("""INSERT INTO cartera 
+                                           (usuario_id, nombre_jugador, porcentaje, costo_compra, club) 
+                                           VALUES (?,?,?,?,?)""",
+                                        (u_id, nom, pct, costo_ficha, dj.iloc[2]), commit=True)
+                            
+                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", 
+                                        (inversion_total, u_id), commit=True)
+                            
+                            ejecutar_db("""INSERT INTO historial (usuario_id, detalle, monto, fecha) 
+                                           VALUES (?,?,?,?)""", 
+                                        (u_id, f"Compra {int(pct)}% {nom} (inc. Gastos)", -inversion_total, 
+                                         datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                            
+                            st.success("✅ Trato cerrado. La comisión se ha cobrado pero no afecta el valor del activo.")
+                            st.session_state.version += 1
+                            st.rerun()
+                        else:
+                            st.error("❌ Fondos insuficientes para cubrir la ficha y los gastos administrativos.")
 
 # --- 5. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Mis Jugadores Representados")
