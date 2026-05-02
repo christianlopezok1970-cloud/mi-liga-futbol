@@ -154,18 +154,29 @@ with st.expander("🔍 Scouting "):
                     st.write(f"Gastos Admin (2% del Total): **€ {formatear_total(gastos_admin)}**")
                     st.markdown(f"### Inversión Total: € {formatear_total(inversion_total)}")
                     
-                    if st.button("FICHAR JUGADOR", type="primary"):
-                        if presupuesto >= inversion_total:
-                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
-                                        (u_id, nom, pct, inversion_total, dj.iloc[2]), commit=True)
-                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inversion_total, u_id), commit=True)
-                            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                                        (u_id, f"Compra {int(pct)}% {nom}", -inversion_total, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                            st.success("✅ Trato cerrado con éxito.")
-                            st.session_state.version += 1
-                            st.rerun()
-                        else:
-                            st.error("❌ Fondos insuficientes en la Caja Global.")
+                  if st.button("FICHAR JUGADOR", type="primary"):
+    if presupuesto >= inversion_total:
+        # CAMBIO CLAVE: Guardamos 'costo_ficha' (sin gastos) en la cartera
+        ejecutar_db("""INSERT INTO cartera 
+                       (usuario_id, nombre_jugador, porcentaje, costo_compra, club) 
+                       VALUES (?,?,?,?,?)""",
+                    (u_id, nom, pct, costo_ficha, dj.iloc[2]), commit=True)
+        
+        # El cobro al presupuesto sigue siendo por el 'inversion_total' (ficha + gastos)
+        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", 
+                    (inversion_total, u_id), commit=True)
+        
+        # En el historial registramos el monto total para que el balance cuadre
+        ejecutar_db("""INSERT INTO historial (usuario_id, detalle, monto, fecha) 
+                       VALUES (?,?,?,?)""", 
+                    (u_id, f"Compra {int(pct)}% {nom} (inc. Gastos)", -inversion_total, 
+                     datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+        
+        st.success("✅ Trato cerrado. La comisión se ha cobrado pero no afecta el valor del activo.")
+        st.session_state.version += 1
+        st.rerun()
+    else:
+        st.error("❌ Fondos insuficientes para cubrir la ficha y los gastos administrativos.")
 
 # --- 5. PANEL DE ACTIVOS ---
 st.markdown("##### 📋 Mis Jugadores Representados")
