@@ -101,8 +101,8 @@ if prestigio >= 1:
             st.rerun()
 
 if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
-    with st.sidebar.expander("⚠️ ZONA DE PELIGRO"):
-        if st.text_input("Escribe 'BORRAR' para confirmar:").upper() == "BORRAR":
+    with st.sidebar.expander("⚠️ ZONA DE RESET"):
+        if st.text_input("Escribe la clave para confirmar:").upper() == "BORRAR":
             if st.button("EJECUTAR RESET TOTAL"):
                 ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
                 ejecutar_db("DELETE FROM historial WHERE usuario_id = ?", (u_id,), commit=True)
