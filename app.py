@@ -72,7 +72,7 @@ def calcular_cambio_prestigio(pts):
 st.set_page_config(page_title="World Transfer Market v40", layout="wide")
 if 'version' not in st.session_state: st.session_state.version = 0
 
-st.subheader("Transfer Market - Agencia Global")
+st.subheader("Pro Fútbol Manager")
 
 manager = st.sidebar.text_input("Nombre del Agente:").strip()
 if not manager:
@@ -112,7 +112,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
 
 # --- 4. SCOUTING Y COMPRA ---
 df_oficial = cargar_datos_completos_google()
-with st.expander("🔍 Scouting y Co-propiedad"):
+with st.expander("🔍 Scouting "):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
         seleccion = c1.selectbox("Buscar Jugador:", options=[""] + df_oficial['Display'].tolist(), key=f"sel_{st.session_state.version}")
@@ -136,7 +136,7 @@ with st.expander("🔍 Scouting y Co-propiedad"):
                 if disp_final <= 0:
                     st.error(f"🚫 No puedes representar a este jugador. Tu prestigio ({prestigio}) es insuficiente o no hay stock disponible.")
                 else:
-                    st.info(f"📊 Capacidad actual: {disp_final}% (basado en tu Reputación)")
+                    st.info(f" Capacidad actual: {disp_final}% (basado en tu Reputación)")
                     
                     opciones = [p for p in [1, 5, 10, 25, 50, 75, 100] if p <= disp_final]
                     if disp_final not in opciones:
