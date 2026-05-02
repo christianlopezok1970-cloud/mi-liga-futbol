@@ -93,10 +93,10 @@ st.sidebar.metric("Reputación", f"{prestigio} pts")
 st.sidebar.divider()
 if prestigio >= 1:
     with st.sidebar.popover("💰 Solicitar Crédito"):
-        if st.button("Confirmar (€ 150.000 x -1 Rep)"):
-            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 150000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
+        if st.button("Confirmar (€ 100.000 x -1 Rep)"):
+            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 100000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
             ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                        (u_id, "Crédito Bancario", 150000, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                        (u_id, "Crédito Bancario", 100000, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
             st.session_state.version += 1
             st.rerun()
 
