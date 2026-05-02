@@ -181,7 +181,7 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         
         with col_info:
             st.subheader(j_nom)
-            st.write(f"🌍 {j_club}")
+            st.write(f"👤 {j_club}")
             st.markdown(f'<div style="font-size:16px; color:#FFD700; font-weight:bold;">{int(j_pct)}% | Inversión: € {formatear_total(j_costo)}</div>', unsafe_allow_html=True)
         
         with col_input:
