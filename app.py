@@ -71,7 +71,6 @@ def calcular_cambio_prestigio(pts):
 
 # --- 3. INTERFAZ ---
 st.set_page_config(page_title="Pro Fútbol Manager v40", layout="wide")
-
 st.subheader("Pro Fútbol Manager")
 
 manager = st.sidebar.text_input("Nombre del Agente:").strip()
@@ -87,7 +86,7 @@ if not datos:
 u_id, presupuesto, prestigio = datos[0]
 df_oficial = cargar_datos_completos_google()
 
-# --- 4. PROCESAMIENTO AUTOMÁTICO ---
+# --- 4. PROCESAMIENTO AUTOMÁTICO (CONTRA DOBLE COBRO)[cite: 1] ---
 if not df_oficial.empty:
     cartera_activa = ejecutar_db("SELECT nombre_jugador, costo_compra FROM cartera WHERE usuario_id = ?", (u_id,))
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -126,7 +125,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
                 ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
                 st.rerun()
 
-# --- 6. SCOUTING (CON BLOQUEO DE DUPLICADOS) ---
+# --- 6. SCOUTING (BLOQUEO DE COMPRA DUPLICADA)[cite: 1] ---
 with st.expander("🔍 Scouting y Mercado"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
@@ -135,11 +134,11 @@ with st.expander("🔍 Scouting y Mercado"):
             dj = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nom = dj.iloc[0]
             
-            # NUEVO: Verificar si el agente ya tiene a este jugador[cite: 1]
+            # Verificación de propiedad previa[cite: 1]
             ya_lo_tiene = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
             
             if ya_lo_tiene:
-                st.warning(f"⚠️ Ya representas a {nom}. No puedes comprarlo dos veces.")
+                st.warning(f"⚠️ Ya representas a {nom}. No es posible comprarlo nuevamente.")
             else:
                 v_m_t = int(dj['ValorNum'])
                 vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
@@ -161,6 +160,7 @@ with st.expander("🔍 Scouting y Mercado"):
                     
                     if st.button("FICHAR JUGADOR", type="primary"):
                         if presupuesto >= inv:
+                            # Se guarda el Club (dj.iloc[2]) en la base de datos[cite: 1]
                             ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[2]), commit=True)
                             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                             ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
@@ -168,7 +168,7 @@ with st.expander("🔍 Scouting y Mercado"):
                         else: st.error("Fondos insuficientes.")
                 else: st.error("Sin stock disponible o prestigio insuficiente.")
 
-# --- 7. MIS REPRESENTADOS ---
+# --- 7. MIS REPRESENTADOS (CON EQUIPO/CLUB VISIBLE)[cite: 1] ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 if not cartera: st.write("No tienes jugadores representados.")
@@ -177,9 +177,12 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         col1, col2 = st.columns([3, 1])
         with col1:
+            # Se muestra el nombre, el club con icono y el porcentaje[cite: 1]
+            st.markdown(f"#### {j_nom}")
+            st.markdown(f"**Equipo:** 🏛️ {j_club} | **Representación:** 📈 {int(j_pct)}%")
+            
             score_e = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]['ScoreOficial'].values[0] if not df_oficial.empty else 0
-            st.write(f"**{j_nom}** | 🏛️ {j_club} | 📈 {int(j_pct)}%")
-            st.write(f"Inversión: € {formatear_total(j_costo)} | Score Excel: {score_e}")
+            st.write(f"Inversión inicial: € {formatear_total(j_costo)} | Último Score: {score_e}")
         with col2:
             confirmar = st.checkbox("Confirmar Venta", key=f"check_{j_id}")
             v_venta = j_costo * 0.99
