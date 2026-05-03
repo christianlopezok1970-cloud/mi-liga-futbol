@@ -203,17 +203,20 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
             texto_venta = f"VENDER (€ {formatear_total(valor_venta)})"
             
             c_c1, c_c2 = st.columns(2)
-            if c_c1.button("CARGAR", key=f"btn_r_{v_key}", type="primary", disabled=not conf, use_container_width=True):
+           if c_c1.button("CARGAR", key=f"btn_r_{v_key}", type="primary", disabled=not conf, use_container_width=True):
+                # Línea 207: Actualización de datos
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", 
                             (bal, calcular_cambio_prestigio(pts), u_id), commit=True)
-              if bal != 0:
-                    # Creamos un detalle descriptivo con el score y el monto
+                
+                # Línea 209: ESTE 'IF' DEBE ESTAR ALINEADO CON EL 'ejecutar_db' DE ARRIBA
+                if bal != 0:
                     simbolo = "🟢" if bal > 0 else "🔴"
-                    detalle_rendimiento = f"Rendimiento {j_nom} (Score: {pts}) | {simbolo} € {formatear_total(bal)}"
+                    detalle_historial = f"Rendimiento {j_nom} (Score: {pts}) | {simbolo} € {formatear_total(bal)}"
                     
                     ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                                (u_id, detalle_rendimiento, bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                                (u_id, detalle_historial, bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                 
+                # Estas dos líneas también deben estar alineadas con el 'if bal'
                 st.session_state.version += 1
                 st.rerun()
             
