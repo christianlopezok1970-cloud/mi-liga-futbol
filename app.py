@@ -36,16 +36,16 @@ def cargar_datos_completos_google():
                 s = str(val).replace('.','').replace(',','')
                 return int(''.join(filter(str.isdigit, s)))
             except: return 1000000
+        # Según tu orden: 0:Nombre, 1:Equipo, 2:POS, 3:Cotización[cite: 1]
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
-        df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 2] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 1] + "]"
-        if 'Puntaje' in df.columns:
-            df['ScoreOficial'] = pd.to_numeric(df['Puntaje'], errors='coerce').fillna(0)
-        else:
-            df['ScoreOficial'] = 0
+        df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 1] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 2] + "]"
+        
+        # El puntaje está en la columna 4[cite: 1]
+        df['ScoreOficial'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
         return df
     except: return pd.DataFrame()
 
-# Inicialización de tablas[cite: 1]
+# Tablas[cite: 1]
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
@@ -155,38 +155,35 @@ with st.expander("🔍 Scouting y Mercado"):
                     st.info(f"Ficha: € {formatear_total(costo_f)} | Gastos Admin (2%): € {formatear_total(v_m_t * 0.02)}")
                     if st.button("FICHAR JUGADOR", type="primary"):
                         if presupuesto >= inv:
-                            # Guardamos el club desde la columna 2 del Excel[cite: 1]
-                            club_excel = dj.iloc[2]
-                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, club_excel), commit=True)
+                            # Según tu nuevo orden: Índice 1 es EQUIPO[cite: 1]
+                            club_real = dj.iloc[1] 
+                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, club_real), commit=True)
                             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                             ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                             st.rerun()
                 else: st.error("Sin stock o prestigio insuficiente.")
 
-# --- 7. MIS REPRESENTADOS (CORRECCIÓN EQUIPO VACÍO)[cite: 1] ---
+# --- 7. MIS REPRESENTADOS ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 if not cartera: st.write("No tienes jugadores representados.")
 
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
-    # Lógica de rescate: Si el club está vacío en la DB, buscarlo en el DataFrame cargado[cite: 1]
-    club_mostrar = j_club
+    club_final = j_club
     score_e = 0
     
     if not df_oficial.empty:
         match_info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
         if not match_info.empty:
             score_e = match_info['ScoreOficial'].values[0]
-            # Si en la DB el club es None o vacío, usamos el del Excel[cite: 1]
-            if not j_club or str(j_club).lower() in ["none", "nan", ""]:
-                club_mostrar = match_info.iloc[0, 2] 
+            # Rescate: Columna 1 del Excel es el Equipo[cite: 1]
+            club_final = match_info.iloc[0, 1] 
 
     with st.container(border=True):
         col1, col2 = st.columns([3, 1])
         with col1:
             st.markdown(f"#### {j_nom}")
-            # Se muestra el club recuperado[cite: 1]
-            st.markdown(f"**Equipo:** 🏛️ {club_mostrar if club_mostrar else 'No asignado'} | **Representación:** 📈 {int(j_pct)}%")
+            st.markdown(f"**Equipo:** 🏛️ {club_final} | **Representación:** 📈 {int(j_pct)}%")
             st.write(f"Inversión inicial: € {formatear_total(j_costo)} | Último Score: {score_e}")
         with col2:
             confirmar = st.checkbox("Confirmar Venta", key=f"check_{j_id}")
@@ -208,4 +205,3 @@ with c_hist:
     with st.expander("📜 Historial"):
         hist = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 15", (u_id,))
         st.dataframe(pd.DataFrame(hist, columns=['Fecha', 'Detalle', 'Monto']), hide_index=True)
-    
