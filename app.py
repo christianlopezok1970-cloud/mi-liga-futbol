@@ -37,9 +37,7 @@ def cargar_datos_completos_google():
                 return int(''.join(filter(str.isdigit, s)))
             except: return 1000000
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
-        # Display: Nombre (Club) - Valor [Posición]
         df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 2] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 1] + "]"
-        # CARGA DE PUNTAJE DESDE COLUMNA "Puntaje"
         if 'Puntaje' in df.columns:
             df['ScoreOficial'] = pd.to_numeric(df['Puntaje'], errors='coerce').fillna(0)
         else:
@@ -68,7 +66,7 @@ def calcular_cambio_prestigio(pts):
     if p >= 8.0: return 2
     if p >= 7.0: return 1
     if p <= 5.9: return -2
-    if p <= 6.7: return -1 # Se ajusta para que 6.8+ sea positivo o neutro
+    if p <= 6.7: return -1
     return 0
 
 # --- 3. INTERFAZ ---
@@ -90,7 +88,7 @@ if not datos:
 u_id, presupuesto, prestigio = datos[0]
 df_oficial = cargar_datos_completos_google()
 
-# --- 4. PROCESAMIENTO AUTOMÁTICO (SOLO UNA VEZ POR DÍA) ---
+# --- 4. PROCESAMIENTO AUTOMÁTICO ---
 if not df_oficial.empty:
     cartera_activa = ejecutar_db("SELECT nombre_jugador, costo_compra FROM cartera WHERE usuario_id = ?", (u_id,))
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -109,21 +107,18 @@ if not df_oficial.empty:
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", (bal, pres_mod, u_id), commit=True)
                     detalle = f"Auto-Jornada: {j_nom} (Score: {pts_oficial}) | € {formatear_total(bal)}"
                     ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, detalle, bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                    st.toast(f"✅ Cobro automático: {j_nom}")
-    # Actualizar variables tras cobro
+                    st.toast(f"✅ Jornada procesada: {j_nom}")
     datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
     u_id, presupuesto, prestigio = datos[0]
 
-# --- SIDEBAR (METRICAS, CRÉDITO Y RESET) ---
+# --- SIDEBAR ---
 st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
-
 st.sidebar.divider()
 with st.sidebar.popover("💰 Solicitar Crédito"):
     if st.button("Confirmar (€ 100.000 x -1 Rep)"):
         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + 100000, prestigio = prestigio - 1 WHERE id = ?", (u_id,), commit=True)
         ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, "Crédito Bancario", 100000, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-        st.session_state.version += 1
         st.rerun()
 
 if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
@@ -135,7 +130,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
                 ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
                 st.rerun()
 
-# --- 5. SCOUTING (BUSCADOR) ---
+# --- 5. SCOUTING (BUSCADOR CORREGIDO) ---
 with st.expander("🔍 Scouting y Mercado"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
@@ -146,49 +141,65 @@ with st.expander("🔍 Scouting y Mercado"):
             v_m_t = int(dj['ValorNum'])
             vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
             disp_m = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
-            disp_f = min(disp_m, int(prestigio))
             
-            if disp_f > 0:
-                pct = c2.select_slider("Porcentaje:", [1, 5, 10, 25, 50, 75, 100] if disp_f>=100 else [1, 5, 10, 25, 50]) # Simplificado
+            # El valor máximo del slider respeta el prestigio y el stock disponible[cite: 1]
+            max_posible = min(disp_m, int(prestigio))
+            
+            if max_posible > 0:
+                opciones = [1, 5, 10, 25, 50, 75, 100]
+                opciones_validas = [o for o in opciones if o <= max_posible]
+                if not opciones_validas: opciones_validas = [max_posible]
+                
+                pct = c2.select_slider("Porcentaje a adquirir:", opciones_validas)
                 costo_f = (v_m_t * pct) / 100
                 g_admin = v_m_t * 0.02
                 inv = costo_f + g_admin
-                st.write(f"Inversión: € {formatear_total(inv)}")
-                if st.button("FICHAR"):
+                
+                # Mostrar costos antes de fichar[cite: 1]
+                st.info(f"Ficha: € {formatear_total(costo_f)} | Gastos Admin (2%): € {formatear_total(g_admin)}")
+                st.markdown(f"### Total Inversión: € {formatear_total(inv)}")
+                
+                if st.button("FICHAR JUGADOR", type="primary"):
                     if presupuesto >= inv:
                         ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[2]), commit=True)
                         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                         ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                         st.rerun()
-            else: st.error("Sin stock o prestigio insuficiente.")
+                    else: st.error("Fondos insuficientes.")
+            else: st.error("No puedes adquirir este jugador (Prestigio insuficiente o sin stock).")
 
-# --- 6. PANEL DE ACTIVOS Y VENTA ---
-st.markdown("### 📋 Mis Activos")
+# --- 6. MIS REPRESENTADOS (CON SEGURIDAD EN VENTA) ---
+st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
+if not cartera: st.write("No tienes jugadores representados.")
+
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         col1, col2 = st.columns([3, 1])
         with col1:
             score_e = df_oficial[df_oficial.iloc[:, 0] == j_nom]['ScoreOficial'].values[0] if not df_oficial.empty else 0
-            st.write(f"**{j_nom}** ({j_club}) | {int(j_pct)}% | Inversión: € {formatear_total(j_costo)}")
-            st.caption(f"Puntaje actual en Excel: {score_e}")
+            # Se incluye el Club en la visualización[cite: 1]
+            st.write(f"**{j_nom}** | 🏛️ {j_club} | 📈 {int(j_pct)}%")
+            st.write(f"Inversión: € {formatear_total(j_costo)} | Score Excel: {score_e}")
         with col2:
-            if st.button("VENDER (99%)", key=f"v_{j_id}"):
-                v_venta = j_costo * 0.99
+            # Seguridad: Checkbox antes de vender[cite: 1]
+            confirmar = st.checkbox("Confirmar Venta", key=f"check_{j_id}")
+            v_venta = j_costo * 0.99
+            if st.button(f"VENDER (€{formatear_total(v_venta)})", key=f"v_{j_id}", disabled=not confirmar):
                 ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (v_venta, u_id), commit=True)
                 ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Venta {j_nom}", v_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                 st.rerun()
 
-# --- 7. RANKING Y HISTORIAL ---
+# --- 7. RANKING E HISTORIAL (DESPLEGABLES) ---
 st.divider()
 c_rank, c_hist = st.columns(2)
 with c_rank:
-    st.markdown("🏆 **Ranking de Agentes**")
-    usuarios = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios ORDER BY prestigio DESC")
-    st.table(pd.DataFrame(usuarios, columns=['Agente', 'Rep', 'Caja']))
+    with st.expander("🏆 Ranking de Agentes"): # Ahora es desplegable[cite: 1]
+        usuarios = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios ORDER BY prestigio DESC")
+        st.table(pd.DataFrame(usuarios, columns=['Agente', 'Rep', 'Caja']))
 with c_hist:
-    st.markdown("📜 **Historial**")
-    hist = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 10", (u_id,))
-    df_h = pd.DataFrame(hist, columns=['Fecha', 'Detalle', 'Monto'])
-    st.dataframe(df_h, hide_index=True)
+    with st.expander("📜 Historial de Operaciones"): # Ahora es desplegable[cite: 1]
+        hist = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 15", (u_id,))
+        df_h = pd.DataFrame(hist, columns=['Fecha', 'Detalle', 'Monto'])
+        st.dataframe(df_h, hide_index=True, use_container_width=True)
