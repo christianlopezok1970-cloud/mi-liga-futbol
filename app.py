@@ -36,7 +36,7 @@ def cargar_datos_completos_google():
                 s = str(val).replace('.','').replace(',','')
                 return int(''.join(filter(str.isdigit, s)))
             except: return 1000000
-        # Orden: 0:Nombre, 1:Equipo, 2:POS, 3:Cotización[cite: 1]
+        # 0:Nombre, 1:Equipo, 2:POS, 3:Cotización[cite: 1]
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
         df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 1] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 2] + "]"
         df['ScoreOficial'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
@@ -175,14 +175,12 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         col1, col2 = st.columns([3, 1])
         with col1:
-            # Formato: Nombre (Equipo)[cite: 1]
-            st.markdown(f"#### {j_nom} ({equipo})")
-            # Formato: POS | 1%[cite: 1]
+            # Reducimos el tamaño del equipo con la etiqueta <small>[cite: 1]
+            st.markdown(f"#### {j_nom} <small>({equipo})</small>", unsafe_allow_html=True)
             st.markdown(f"{posicion} | {int(j_pct)}%")
-            # Formato: Inversión: € 3.000 | Último Score: 9.8[cite: 1]
             st.write(f"Inversión: € {formatear_total(j_costo)} | Último Score: {score_e}")
         with col2:
-            confirmar = st.checkbox("Confirmar Venta", key=f"check_{j_id}")
+            confirmar = st.checkbox("Venta", key=f"check_{j_id}")
             v_venta = j_costo * 0.99
             if st.button(f"VENDER (€{formatear_total(v_venta)})", key=f"v_{j_id}", disabled=not confirmar):
                 ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
