@@ -22,11 +22,10 @@ def formatear_abreviado(monto):
         elif monto >= 1_000: 
             return f"{monto / 1_000:.0f}K"
         return f"{monto:.0f}"
-    except: 
-        return "0"
+    except: return "0"
 
 def formatear_total(monto):
-    try: return f"{int(monto):,}".replace(',', '.')
+    try: return f"{int(float(monto)):,}".replace(',', '.') # Forzamos int para eliminar decimales[cite: 1]
     except: return "0"
 
 @st.cache_data(ttl=300)
@@ -40,12 +39,12 @@ def cargar_datos_completos_google():
                 return int(''.join(filter(str.isdigit, s)))
             except: return 1000000
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
-        # Aquí aplicamos el nuevo formatear_abreviado para que muestre 1M en el buscador[cite: 1]
         df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 1] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 2] + "]"
         df['ScoreOficial'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
         return df
     except: return pd.DataFrame()
 
+# Inicialización de tablas
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
@@ -102,11 +101,12 @@ if not df_oficial.empty:
                     bal = calcular_balance_fecha(pts_oficial, j_costo)
                     pres_mod = calcular_cambio_prestigio(pts_oficial)
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", (bal, pres_mod, u_id), commit=True)
-                    ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Auto-Jornada: {j_nom.strip()} (Score: {pts_oficial})", bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                    # Guardamos el monto redondeado[cite: 1]
+                    ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Auto-Jornada: {j_nom.strip()} (Score: {pts_oficial})", int(bal), datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                     cambio = True
     if cambio: st.rerun()
 
-# --- 5. SIDEBAR (MÉTRICAS + PRÉSTAMO) ---
+# --- 5. SIDEBAR ---
 st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
@@ -117,15 +117,8 @@ with st.sidebar.expander("🏦 Préstamo Bancario"):
         if monto_p >= 100000:
             costo_p = int(monto_p / 100000)
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = max(0, prestigio - ?) WHERE id = ?", (monto_p, costo_p, u_id), commit=True)
-            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Préstamo (-{costo_p} Rep)", monto_p, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Préstamo (-{costo_p} Rep)", int(monto_p), datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
             st.rerun()
-
-if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
-    if st.sidebar.button("RESET TOTAL"):
-        ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
-        ejecutar_db("DELETE FROM historial WHERE usuario_id = ?", (u_id,), commit=True)
-        ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
-        st.rerun()
 
 # --- 6. SCOUTING Y MERCADO ---
 with st.expander("🔍 Scouting y Mercado"):
@@ -151,9 +144,8 @@ with st.expander("🔍 Scouting y Mercado"):
                     if presupuesto >= inv:
                         ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[1]), commit=True)
                         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
-                        ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                        ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -int(inv), datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                         st.rerun()
-            else: st.error("Reputación insuficiente o sin stock.")
 
 # --- 7. MIS REPRESENTADOS ---
 st.markdown("### 📋 Mis Representados")
@@ -172,19 +164,27 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
             st.write(f"Inversión: € {formatear_total(j_costo)} | Último Score: {score}")
         with c2:
             if st.checkbox("Venta", key=f"c_{j_id}"):
-                if st.button(f"VENDER €{formatear_total(j_costo*0.99)}", key=f"v_{j_id}"):
+                v_venta = int(j_costo * 0.99)
+                if st.button(f"VENDER €{formatear_total(v_venta)}", key=f"v_{j_id}"):
                     ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                    ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_costo*0.99, u_id), commit=True)
+                    ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (v_venta, u_id), commit=True)
+                    ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Venta {j_nom}", v_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                     st.rerun()
 
-# --- 8. RANKING e HISTORIAL ---
+# --- 8. RANKING e HISTORIAL CORREGIDO ---
 st.divider()
 col_a, col_b = st.columns(2)
 with col_a:
     with st.expander("🏆 Ranking"):
         res = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios ORDER BY prestigio DESC")
-        st.table(pd.DataFrame(res, columns=['Agente', 'Rep', 'Caja']))
+        df_rank = pd.DataFrame(res, columns=['Agente', 'Rep', 'Caja'])
+        df_rank['Caja'] = df_rank['Caja'].apply(formatear_total)
+        st.table(df_rank)
+
 with col_b:
     with st.expander("📜 Historial"):
         h = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 10", (u_id,))
-        st.table(pd.DataFrame(h, columns=['Fecha', 'Evento', 'Monto']))
+        df_hist = pd.DataFrame(h, columns=['Fecha', 'Evento', 'Monto'])
+        # Aplicamos formatear_total a la columna Monto para limpiar decimales[cite: 1]
+        df_hist['Monto'] = df_hist['Monto'].apply(formatear_total)
+        st.table(df_hist)
