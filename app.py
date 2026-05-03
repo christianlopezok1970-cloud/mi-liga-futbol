@@ -36,7 +36,7 @@ def cargar_datos_completos_google():
                 s = str(val).replace('.','').replace(',','')
                 return int(''.join(filter(str.isdigit, s)))
             except: return 1000000
-        # 0:Nombre, 1:Equipo, 2:POS, 3:Cotización[cite: 1]
+        # Orden: 0:Nombre, 1:Equipo, 2:POS, 3:Cotización[cite: 1]
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
         df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 1] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 2] + "]"
         df['ScoreOficial'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
@@ -151,33 +151,35 @@ with st.expander("🔍 Scouting y Mercado"):
                     st.info(f"Ficha: € {formatear_total(costo_f)} | Gastos Admin (2%): € {formatear_total(v_m_t * 0.02)}")
                     if st.button("FICHAR JUGADOR", type="primary"):
                         if presupuesto >= inv:
-                            # Guardamos el club/equipo (Índice 1)[cite: 1]
                             ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[1]), commit=True)
                             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                             ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                             st.rerun()
 
-# --- 7. MIS REPRESENTADOS (VISUALIZACIÓN LIMPIA) ---
+# --- 7. MIS REPRESENTADOS ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 if not cartera: st.write("No tienes jugadores representados.")
 
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     posicion = ""
+    equipo = j_club
     score_e = 0
     if not df_oficial.empty:
         match_info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
         if not match_info.empty:
             score_e = match_info['ScoreOficial'].values[0]
-            posicion = match_info.iloc[0, 2] # Columna POS[cite: 1]
+            equipo = match_info.iloc[0, 1] # Equipo[cite: 1]
+            posicion = match_info.iloc[0, 2] # POS[cite: 1]
 
     with st.container(border=True):
         col1, col2 = st.columns([3, 1])
         with col1:
-            # Formato solicitado: Nombre / Posición | Porcentaje[cite: 1]
-            st.markdown(f"#### {j_nom}")
+            # Formato: Nombre (Equipo)[cite: 1]
+            st.markdown(f"#### {j_nom} ({equipo})")
+            # Formato: POS | 1%[cite: 1]
             st.markdown(f"{posicion} | {int(j_pct)}%")
-            # Texto limpio: Inversión | Último Score[cite: 1]
+            # Formato: Inversión: € 3.000 | Último Score: 9.8[cite: 1]
             st.write(f"Inversión: € {formatear_total(j_costo)} | Último Score: {score_e}")
         with col2:
             confirmar = st.checkbox("Confirmar Venta", key=f"check_{j_id}")
