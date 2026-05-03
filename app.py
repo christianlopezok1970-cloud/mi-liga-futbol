@@ -25,7 +25,7 @@ def formatear_abreviado(monto):
     except: return "0"
 
 def formatear_total(monto):
-    try: return f"{int(float(monto)):,}".replace(',', '.') # Forzamos int para eliminar decimales[cite: 1]
+    try: return f"{int(float(monto)):,}".replace(',', '.')
     except: return "0"
 
 @st.cache_data(ttl=300)
@@ -101,7 +101,6 @@ if not df_oficial.empty:
                     bal = calcular_balance_fecha(pts_oficial, j_costo)
                     pres_mod = calcular_cambio_prestigio(pts_oficial)
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", (bal, pres_mod, u_id), commit=True)
-                    # Guardamos el monto redondeado[cite: 1]
                     ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Auto-Jornada: {j_nom.strip()} (Score: {pts_oficial})", int(bal), datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                     cambio = True
     if cambio: st.rerun()
@@ -146,8 +145,9 @@ with st.expander("🔍 Scouting y Mercado"):
                         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                         ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -int(inv), datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                         st.rerun()
+            else: st.error("Reputación insuficiente o sin stock.")
 
-# --- 7. MIS REPRESENTADOS ---
+# --- 7. MIS REPRESENTADOS (MEJORADO) ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
@@ -160,8 +160,9 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         c1, c2 = st.columns([3, 1])
         with c1:
             st.markdown(f"#### {j_nom} <small>({eq})</small>", unsafe_allow_html=True)
-            st.markdown(f"{pos} | {int(j_pct)}%")
-            st.write(f"Inversión: € {formatear_total(j_costo)} | Último Score: {score}")
+            # Etiqueta de participación añadida aquí[cite: 1]
+            st.markdown(f"**Posición:** {pos} | **Participación:** {int(j_pct)}%")
+            st.write(f"Inversión inicial: € {formatear_total(j_costo)} | Último Score: {score}")
         with c2:
             if st.checkbox("Venta", key=f"c_{j_id}"):
                 v_venta = int(j_costo * 0.99)
@@ -171,7 +172,7 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
                     ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Venta {j_nom}", v_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                     st.rerun()
 
-# --- 8. RANKING e HISTORIAL CORREGIDO ---
+# --- 8. RANKING e HISTORIAL ---
 st.divider()
 col_a, col_b = st.columns(2)
 with col_a:
@@ -180,11 +181,9 @@ with col_a:
         df_rank = pd.DataFrame(res, columns=['Agente', 'Rep', 'Caja'])
         df_rank['Caja'] = df_rank['Caja'].apply(formatear_total)
         st.table(df_rank)
-
 with col_b:
     with st.expander("📜 Historial"):
         h = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 10", (u_id,))
         df_hist = pd.DataFrame(h, columns=['Fecha', 'Evento', 'Monto'])
-        # Aplicamos formatear_total a la columna Monto para limpiar decimales[cite: 1]
         df_hist['Monto'] = df_hist['Monto'].apply(formatear_total)
         st.table(df_hist)
