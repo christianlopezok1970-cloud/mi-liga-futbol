@@ -125,7 +125,7 @@ st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
 with st.sidebar.expander("🏦 Préstamo Bancario"):
-    st.caption("⚠️ € 100.000 = -1 de Reputación[cite: 2]")
+    st.caption("€ 100.000 = -1 de Reputación")
     monto_p = st.number_input("Monto (€):", min_value=0, step=100000)
     if st.button("Confirmar Préstamo"):
         if monto_p >= 100000:
