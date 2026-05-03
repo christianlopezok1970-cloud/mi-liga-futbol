@@ -45,7 +45,7 @@ def cargar_datos_completos_google():
         return df
     except: return pd.DataFrame()
 
-# Creación de tablas[cite: 1]
+# Inicialización de tablas[cite: 1]
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
@@ -86,7 +86,7 @@ if not datos:
 u_id, presupuesto, prestigio = datos[0]
 df_oficial = cargar_datos_completos_google()
 
-# --- 4. PROCESAMIENTO AUTOMÁTICO (CONTRA DOBLE COBRO)[cite: 1] ---
+# --- 4. PROCESAMIENTO AUTOMÁTICO ---
 if not df_oficial.empty:
     cartera_activa = ejecutar_db("SELECT nombre_jugador, costo_compra FROM cartera WHERE usuario_id = ?", (u_id,))
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -125,7 +125,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
                 ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
                 st.rerun()
 
-# --- 6. SCOUTING (BLOQUEO DE COMPRA DUPLICADA)[cite: 1] ---
+# --- 6. SCOUTING Y MERCADO ---
 with st.expander("🔍 Scouting y Mercado"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
@@ -134,21 +134,18 @@ with st.expander("🔍 Scouting y Mercado"):
             dj = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nom = dj.iloc[0]
             
-            # Verificación de propiedad previa[cite: 1]
             ya_lo_tiene = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
             
             if ya_lo_tiene:
-                st.warning(f"⚠️ Ya representas a {nom}. No es posible comprarlo nuevamente.")
+                st.warning(f"⚠️ Ya representas a {nom}.")
             else:
                 v_m_t = int(dj['ValorNum'])
                 vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
                 disp_m = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
-                
                 max_posible = min(disp_m, int(prestigio))
                 
                 if max_posible > 0:
-                    opciones = [1, 5, 10, 25, 50, 75, 100]
-                    opciones_validas = [o for o in opciones if o <= max_posible]
+                    opciones_validas = [o for o in [1, 5, 10, 25, 50, 75, 100] if o <= max_posible]
                     if not opciones_validas: opciones_validas = [max_posible]
                     
                     pct = c2.select_slider("Porcentaje a adquirir:", opciones_validas)
@@ -156,32 +153,40 @@ with st.expander("🔍 Scouting y Mercado"):
                     inv = costo_f + (v_m_t * 0.02)
                     
                     st.info(f"Ficha: € {formatear_total(costo_f)} | Gastos Admin (2%): € {formatear_total(v_m_t * 0.02)}")
-                    st.markdown(f"### Total Inversión: € {formatear_total(inv)}")
-                    
                     if st.button("FICHAR JUGADOR", type="primary"):
                         if presupuesto >= inv:
-                            # Se guarda el Club (dj.iloc[2]) en la base de datos[cite: 1]
-                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[2]), commit=True)
+                            # Guardamos el club desde la columna 2 del Excel[cite: 1]
+                            club_excel = dj.iloc[2]
+                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, club_excel), commit=True)
                             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                             ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                             st.rerun()
-                        else: st.error("Fondos insuficientes.")
-                else: st.error("Sin stock disponible o prestigio insuficiente.")
+                else: st.error("Sin stock o prestigio insuficiente.")
 
-# --- 7. MIS REPRESENTADOS (CON EQUIPO/CLUB VISIBLE)[cite: 1] ---
+# --- 7. MIS REPRESENTADOS (CORRECCIÓN EQUIPO VACÍO)[cite: 1] ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 if not cartera: st.write("No tienes jugadores representados.")
 
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
+    # Lógica de rescate: Si el club está vacío en la DB, buscarlo en el DataFrame cargado[cite: 1]
+    club_mostrar = j_club
+    score_e = 0
+    
+    if not df_oficial.empty:
+        match_info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
+        if not match_info.empty:
+            score_e = match_info['ScoreOficial'].values[0]
+            # Si en la DB el club es None o vacío, usamos el del Excel[cite: 1]
+            if not j_club or str(j_club).lower() in ["none", "nan", ""]:
+                club_mostrar = match_info.iloc[0, 2] 
+
     with st.container(border=True):
         col1, col2 = st.columns([3, 1])
         with col1:
-            # Se muestra el nombre, el club con icono y el porcentaje[cite: 1]
             st.markdown(f"#### {j_nom}")
-            st.markdown(f"**Equipo:** 🏛️ {j_club} | **Representación:** 📈 {int(j_pct)}%")
-            
-            score_e = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]['ScoreOficial'].values[0] if not df_oficial.empty else 0
+            # Se muestra el club recuperado[cite: 1]
+            st.markdown(f"**Equipo:** 🏛️ {club_mostrar if club_mostrar else 'No asignado'} | **Representación:** 📈 {int(j_pct)}%")
             st.write(f"Inversión inicial: € {formatear_total(j_costo)} | Último Score: {score_e}")
         with col2:
             confirmar = st.checkbox("Confirmar Venta", key=f"check_{j_id}")
@@ -203,3 +208,4 @@ with c_hist:
     with st.expander("📜 Historial"):
         hist = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 15", (u_id,))
         st.dataframe(pd.DataFrame(hist, columns=['Fecha', 'Detalle', 'Monto']), hide_index=True)
+    
