@@ -38,14 +38,17 @@ def cargar_datos_completos_google():
             except: return 1000000
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
         df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 2] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 1] + "]"
+        
+        # Columna de Puntaje y Jornada
         if 'Puntaje' in df.columns:
             df['ScoreOficial'] = pd.to_numeric(df['Puntaje'], errors='coerce').fillna(0)
         else:
             df['ScoreOficial'] = 0
+            
         return df
     except: return pd.DataFrame()
 
-# Tablas
+# Tablas iniciales
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
@@ -69,7 +72,7 @@ def calcular_cambio_prestigio(pts):
     if p <= 6.7: return -1
     return 0
 
-# --- 3. INTERFAZ ---
+# --- 3. INTERFAZ Y LOGIN ---
 st.set_page_config(page_title="Pro Fútbol Manager v40", layout="wide")
 if 'version' not in st.session_state: st.session_state.version = 0
 
@@ -88,30 +91,36 @@ if not datos:
 u_id, presupuesto, prestigio = datos[0]
 df_oficial = cargar_datos_completos_google()
 
-# --- 4. PROCESAMIENTO AUTOMÁTICO ---
+# --- 4. PROCESAMIENTO AUTOMÁTICO (EVITA DUPLICADOS POR JORNADA) ---
 if not df_oficial.empty:
     cartera_activa = ejecutar_db("SELECT nombre_jugador, costo_compra FROM cartera WHERE usuario_id = ?", (u_id,))
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    col_jornada = 'Jornada' if 'Jornada' in df_oficial.columns else None
+
     for j_nom, j_costo in cartera_activa:
         match = df_oficial[df_oficial.iloc[:, 0] == j_nom]
-        if not match.empty:
-            pts_oficial = float(match['ScoreOficial'].values[0])
-            if pts_oficial > 0:
-                ya_cobrado = ejecutar_db(
-                    "SELECT id FROM historial WHERE usuario_id = ? AND detalle LIKE ? AND fecha LIKE ?", 
-                    (u_id, f"Auto-Jornada: {j_nom}%", f"{fecha_hoy}%")
-                )
-                if not ya_cobrado:
-                    bal = calcular_balance_fecha(pts_oficial, j_costo)
-                    pres_mod = calcular_cambio_prestigio(pts_oficial)
-                    ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", (bal, pres_mod, u_id), commit=True)
-                    detalle = f"Auto-Jornada: {j_nom} (Score: {pts_oficial}) | € {formatear_total(bal)}"
-                    ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, detalle, bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                    st.toast(f"✅ Jornada procesada: {j_nom}")
+        if not match.empty and col_jornada:
+            try:
+                pts_oficial = float(match['ScoreOficial'].values[0])
+                id_jornada = str(match[col_jornada].values[0]).strip()
+                
+                # Regla: Puntaje > 0 y Jornada válida
+                if pts_oficial > 0 and id_jornada not in ["0", "nan", "", "None"]:
+                    check_detalle = f"%Auto-Jornada: {j_nom} ({id_jornada})%"
+                    ya_cobrado = ejecutar_db("SELECT id FROM historial WHERE usuario_id = ? AND detalle LIKE ?", (u_id, check_detalle))
+                    
+                    if not ya_cobrado:
+                        bal = calcular_balance_fecha(pts_oficial, j_costo)
+                        pres_mod = calcular_cambio_prestigio(pts_oficial)
+                        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", (bal, pres_mod, u_id), commit=True)
+                        detalle_fijo = f"Auto-Jornada: {j_nom} ({id_jornada}) | Score: {pts_oficial} | € {formatear_total(bal)}"
+                        ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, detalle_fijo, bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                        st.toast(f"✅ {id_jornada} procesada: {j_nom}")
+            except: continue
+    # Actualizar tras procesamiento
     datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
     u_id, presupuesto, prestigio = datos[0]
 
-# --- SIDEBAR ---
+# --- 5. SIDEBAR ---
 st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 st.sidebar.divider()
@@ -130,7 +139,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
                 ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
                 st.rerun()
 
-# --- 5. SCOUTING (BUSCADOR CORREGIDO) ---
+# --- 6. SCOUTING (MERCADO) ---
 with st.expander("🔍 Scouting y Mercado"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
@@ -138,16 +147,15 @@ with st.expander("🔍 Scouting y Mercado"):
         if seleccion:
             dj = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nom = dj.iloc[0]
+            club_origen = dj.iloc[2]
             v_m_t = int(dj['ValorNum'])
             vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
             disp_m = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
             
-            # El valor máximo del slider respeta el prestigio y el stock disponible[cite: 1]
             max_posible = min(disp_m, int(prestigio))
             
             if max_posible > 0:
-                opciones = [1, 5, 10, 25, 50, 75, 100]
-                opciones_validas = [o for o in opciones if o <= max_posible]
+                opciones_validas = [o for o in [1, 5, 10, 25, 50, 75, 100] if o <= max_posible]
                 if not opciones_validas: opciones_validas = [max_posible]
                 
                 pct = c2.select_slider("Porcentaje a adquirir:", opciones_validas)
@@ -155,20 +163,18 @@ with st.expander("🔍 Scouting y Mercado"):
                 g_admin = v_m_t * 0.02
                 inv = costo_f + g_admin
                 
-                # Mostrar costos antes de fichar[cite: 1]
-                st.info(f"Ficha: € {formatear_total(costo_f)} | Gastos Admin (2%): € {formatear_total(g_admin)}")
+                st.info(f"Costo Ficha: € {formatear_total(costo_f)} | Gastos Admin (2%): € {formatear_total(g_admin)}")
                 st.markdown(f"### Total Inversión: € {formatear_total(inv)}")
                 
                 if st.button("FICHAR JUGADOR", type="primary"):
                     if presupuesto >= inv:
-                        ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[2]), commit=True)
+                        ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, club_origen), commit=True)
                         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                         ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                         st.rerun()
-                    else: st.error("Fondos insuficientes.")
-            else: st.error("No puedes adquirir este jugador (Prestigio insuficiente o sin stock).")
+            else: st.error("Sin capacidad de representación.")
 
-# --- 6. MIS REPRESENTADOS (CON SEGURIDAD EN VENTA) ---
+# --- 7. MIS REPRESENTADOS ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 if not cartera: st.write("No tienes jugadores representados.")
@@ -178,28 +184,27 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         col1, col2 = st.columns([3, 1])
         with col1:
             score_e = df_oficial[df_oficial.iloc[:, 0] == j_nom]['ScoreOficial'].values[0] if not df_oficial.empty else 0
-            # Se incluye el Club en la visualización[cite: 1]
+            # Visualización del Club
             st.write(f"**{j_nom}** | 🏛️ {j_club} | 📈 {int(j_pct)}%")
-            st.write(f"Inversión: € {formatear_total(j_costo)} | Score Excel: {score_e}")
+            st.write(f"Inversión: € {formatear_total(j_costo)} | Score en Excel: {score_e}")
         with col2:
-            # Seguridad: Checkbox antes de vender[cite: 1]
-            confirmar = st.checkbox("Confirmar Venta", key=f"check_{j_id}")
+            conf_v = st.checkbox("Confirmar Venta", key=f"cv_{j_id}")
             v_venta = j_costo * 0.99
-            if st.button(f"VENDER (€{formatear_total(v_venta)})", key=f"v_{j_id}", disabled=not confirmar):
+            if st.button(f"VENDER (€{formatear_total(v_venta)})", key=f"btn_v_{j_id}", disabled=not conf_v):
                 ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (v_venta, u_id), commit=True)
                 ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Venta {j_nom}", v_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                 st.rerun()
 
-# --- 7. RANKING E HISTORIAL (DESPLEGABLES) ---
+# --- 8. RANKING E HISTORIAL ---
 st.divider()
 c_rank, c_hist = st.columns(2)
 with c_rank:
-    with st.expander("🏆 Ranking de Agentes"): # Ahora es desplegable[cite: 1]
+    with st.expander("🏆 Ranking de Agentes"):
         usuarios = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios ORDER BY prestigio DESC")
         st.table(pd.DataFrame(usuarios, columns=['Agente', 'Rep', 'Caja']))
 with c_hist:
-    with st.expander("📜 Historial de Operaciones"): # Ahora es desplegable[cite: 1]
+    with st.expander("📜 Historial de Operaciones"):
         hist = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 15", (u_id,))
         df_h = pd.DataFrame(hist, columns=['Fecha', 'Detalle', 'Monto'])
         st.dataframe(df_h, hide_index=True, use_container_width=True)
