@@ -44,7 +44,7 @@ def cargar_datos_completos_google():
         return df
     except: return pd.DataFrame()
 
-# Inicialización de tablas
+# Inicialización
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
@@ -105,7 +105,7 @@ if not df_oficial.empty:
                     cambio = True
     if cambio: st.rerun()
 
-# --- 5. SIDEBAR ---
+# --- 5. SIDEBAR (MÉTRICAS, PRÉSTAMO Y RESET) ---
 st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
@@ -118,6 +118,16 @@ with st.sidebar.expander("🏦 Préstamo Bancario"):
             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = max(0, prestigio - ?) WHERE id = ?", (monto_p, costo_p, u_id), commit=True)
             ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Préstamo (-{costo_p} Rep)", int(monto_p), datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
             st.rerun()
+
+st.sidebar.divider()
+# BOTÓN DE RESET RESTAURADO
+if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
+    if st.sidebar.button("RESET TOTAL", type="secondary", help="Borra toda tu partida"):
+        ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
+        ejecutar_db("DELETE FROM historial WHERE usuario_id = ?", (u_id,), commit=True)
+        ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
+        st.success("Progreso reiniciado")
+        st.rerun()
 
 # --- 6. SCOUTING Y MERCADO ---
 with st.expander("🔍 Scouting y Mercado"):
@@ -147,7 +157,7 @@ with st.expander("🔍 Scouting y Mercado"):
                         st.rerun()
             else: st.error("Reputación insuficiente o sin stock.")
 
-# --- 7. MIS REPRESENTADOS (MEJORADO) ---
+# --- 7. MIS REPRESENTADOS ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
@@ -160,7 +170,6 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         c1, c2 = st.columns([3, 1])
         with c1:
             st.markdown(f"#### {j_nom} <small>({eq})</small>", unsafe_allow_html=True)
-            # Etiqueta de participación añadida aquí[cite: 1]
             st.markdown(f"**Posición:** {pos} | **Participación:** {int(j_pct)}%")
             st.write(f"Inversión inicial: € {formatear_total(j_costo)} | Último Score: {score}")
         with c2:
