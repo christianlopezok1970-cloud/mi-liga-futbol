@@ -20,7 +20,7 @@ def formatear_abreviado(monto):
         if monto >= 1_000_000: 
             return f"{monto / 1_000_000:.1f}M".replace('.0M', 'M').replace('.', ',')
         elif monto >= 1_000: 
-            # Ajuste para evitar "1200K": si es mayor a 999K, pasa a M
+            # Evita valores como 1200K, convirtiéndolos a 1,2M
             if monto >= 1_000_000: return f"{monto / 1_000_000:.1f}M".replace('.', ',')
             return f"{monto / 1_000:.0f}K"
         return f"{monto:.0f}"
@@ -87,7 +87,7 @@ if not datos:
 u_id, presupuesto, prestigio = datos[0]
 df_oficial = cargar_datos_completos_google()
 
-# --- 4. PROCESAMIENTO AUTOMÁTICO (Sin duplicar cobros)[cite: 3] ---
+# --- 4. PROCESAMIENTO AUTOMÁTICO (Prevención de Duplicados)[cite: 3] ---
 if not df_oficial.empty:
     cartera_activa = ejecutar_db("SELECT nombre_jugador, costo_compra FROM cartera WHERE usuario_id = ?", (u_id,))
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -105,7 +105,7 @@ if not df_oficial.empty:
                     ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, check_detalle, bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                     st.toast(f"✅ Jornada procesada: {j_nom}")
     
-    # Recargar datos tras auto-proceso
+    # Recargar datos del usuario tras el proceso automático
     datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
     u_id, presupuesto, prestigio = datos[0]
 
@@ -119,9 +119,12 @@ with st.sidebar.expander("🏦 Préstamo Bancario"):
     if st.button("Confirmar Préstamo"):
         if monto_p >= 100000:
             costo_rep = int(monto_p / 100000)
-            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = max(0, prestigio - ?) WHERE id = ?", (monto_p, costo_rep, u_id), commit=True)
-            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Préstamo (-{costo_rep} Rep)", monto_p, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-            st.rerun()
+            if prestigio >= costo_rep:
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio - ? WHERE id = ?", (monto_p, costo_rep, u_id), commit=True)
+                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Préstamo (-{costo_rep} Rep)", monto_p, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                st.rerun()
+            else:
+                st.error("Reputación insuficiente.")
 
 st.sidebar.divider()
 if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
@@ -131,7 +134,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
         ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
         st.rerun()
 
-# --- 6. SCOUTING Y MERCADO (Ajustado a Reputación / Sin duplicar compras)[cite: 3] ---
+# --- 6. SCOUTING Y MERCADO (Ajustado a Reputación)[cite: 1, 3] ---
 with st.expander("🔍 Scouting y Mercado"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
@@ -140,34 +143,41 @@ with st.expander("🔍 Scouting y Mercado"):
             dj = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
             nom = dj.iloc[0]
             
-            # Bloqueo de duplicados en la misma cartera[cite: 3]
             ya_lo_tiene = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
             if ya_lo_tiene:
                 st.warning(f"⚠️ Ya representas a {nom}.")
             else:
                 v_m_t = int(dj['ValorNum'])
                 vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
-                disp_m = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
-                # Ajuste de fichaje de acuerdo a la reputación
-                max_posible = min(disp_m, int(prestigio))
+                stock_disponible = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
                 
-                if max_posible > 0:
-                    opciones = [o for o in [1, 5, 10, 25, 50, 75, 100] if o <= max_posible]
-                    if not opciones: opciones = [max_posible]
-                    pct = c2.select_slider("Porcentaje a adquirir:", opciones)
-                    costo_f = (v_m_t * pct) / 100
-                    inv = costo_f + (v_m_t * 0.02)
-                    
-                    st.info(f"Costo: € {formatear_total(costo_f)} | Gastos 2%: € {formatear_total(v_m_t * 0.02)}")
-                    if st.button("FICHAR JUGADOR", type="primary"):
-                        if presupuesto >= inv:
-                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[1]), commit=True)
-                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
-                            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                            st.rerun()
-                else: st.error("Reputación insuficiente para este jugador o sin stock.")
+                # REGLA: El porcentaje máximo a comprar es el menor entre el stock y tu reputación
+                max_fichaje = min(stock_disponible, int(prestigio))
+                
+                if max_fichaje > 0:
+                    # Creamos las opciones del slider dinámicamente según la reputación
+                    opciones_fichaje = [o for o in [1, 5, 10, 25, 50, 75, 100] if o <= max_fichaje]
+                    if not opciones_fichaje or max_fichaje not in opciones_fichaje:
+                        opciones_fichaje.append(max_fichaje)
+                    opciones_fichaje = sorted(list(set(opciones_fichaje)))
 
-# --- 7. MIS REPRESENTADOS (Doble seguridad y 99% venta)[cite: 3] ---
+                    pct = c2.select_slider("Porcentaje a adquirir (Limitado por Reputación):", opciones_fichaje)
+                    costo_f = (v_m_t * pct) / 100
+                    inv_total = costo_f + (v_m_t * 0.02)
+                    
+                    st.info(f"Ficha: € {formatear_total(costo_f)} | Gastos Admin (2%): € {formatear_total(v_m_t * 0.02)}")
+                    if st.button("FICHAR JUGADOR", type="primary"):
+                        if presupuesto >= inv_total:
+                            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[1]), commit=True)
+                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv_total, u_id), commit=True)
+                            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv_total, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                            st.rerun()
+                        else:
+                            st.error("Caja insuficiente.")
+                else:
+                    st.error(f"No puedes fichar: Stock {stock_disponible}% | Reputación {prestigio} pts.")
+
+# --- 7. MIS REPRESENTADOS (Venta al 99% con Doble Seguridad)[cite: 2, 3] ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
@@ -178,16 +188,16 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         c1, c2 = st.columns([3, 1])
         with c1:
             st.markdown(f"#### {j_nom} <small>({j_club})</small>", unsafe_allow_html=True)
-            st.markdown(f"**Representación:** {int(j_pct)}%")
+            st.markdown(f"**Participación:** {int(j_pct)}%")
             st.write(f"Inversión: € {formatear_total(j_costo)} | Score: {score}")
         with c2:
-            # Doble seguridad: Checkbox + Botón
-            confirmar = st.checkbox("Confirmar Venta", key=f"chk_{j_id}")
-            v_venta = j_costo * 0.99  # Venta por el 99%[cite: 2]
-            if st.button(f"VENDER €{formatear_total(v_venta)}", key=f"btn_{j_id}", disabled=not confirmar):
+            confirmar_v = st.checkbox("Confirmar Venta", key=f"chk_{j_id}")
+            # Venta por el 99% del costo de compra[cite: 2]
+            valor_salida = j_costo * 0.99
+            if st.button(f"VENDER €{formatear_total(valor_salida)}", key=f"btn_{j_id}", disabled=not confirmar_v):
                 ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (v_venta, u_id), commit=True)
-                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Venta {j_nom}", v_venta, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_salida, u_id), commit=True)
+                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Venta {j_nom}", valor_salida, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                 st.rerun()
 
 # --- 8. RANKING E HISTORIAL ---
