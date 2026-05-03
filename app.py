@@ -36,7 +36,6 @@ def cargar_datos_completos_google():
                 s = str(val).replace('.','').replace(',','')
                 return int(''.join(filter(str.isdigit, s)))
             except: return 1000000
-        # 0:Nombre, 1:Equipo, 2:POS, 3:Cotización[cite: 1]
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
         df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 1] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 2] + "]"
         df['ScoreOficial'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
@@ -75,6 +74,7 @@ if not manager:
     st.info("👋 Ingresa tu nombre para comenzar.")
     st.stop()
 
+# Carga inicial de datos de usuario[cite: 1]
 datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
 if not datos:
     ejecutar_db("INSERT INTO usuarios (nombre, presupuesto, prestigio) VALUES (?, 2000000, 10)", (manager,), commit=True)
@@ -87,6 +87,7 @@ df_oficial = cargar_datos_completos_google()
 if not df_oficial.empty:
     cartera_activa = ejecutar_db("SELECT nombre_jugador, costo_compra FROM cartera WHERE usuario_id = ?", (u_id,))
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    cambio_detectado = False
     for j_nom, j_costo in cartera_activa:
         match = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
         if not match.empty:
@@ -104,9 +105,10 @@ if not df_oficial.empty:
                     detalle = f"Auto-Jornada: {j_nom.strip()} (Score: {pts_oficial}) | € {formatear_total(bal)}"
                     ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, detalle, bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                     st.toast(f"✅ Jornada procesada: {j_nom}")
+                    cambio_detectado = True
     
-    datos = ejecutar_db("SELECT id, presupuesto, prestigio FROM usuarios WHERE nombre = ?", (manager,))
-    u_id, presupuesto, prestigio = datos[0]
+    if cambio_detectado:
+        st.rerun() # Recarga para actualizar prestigio en el slider[cite: 1]
 
 # --- 5. SIDEBAR ---
 st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
@@ -121,7 +123,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
                 ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
                 st.rerun()
 
-# --- 6. SCOUTING Y MERCADO ---
+# --- 6. SCOUTING Y MERCADO (CORRECCIÓN SLIDER) ---
 with st.expander("🔍 Scouting y Mercado"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
@@ -138,13 +140,18 @@ with st.expander("🔍 Scouting y Mercado"):
                 v_m_t = int(dj['ValorNum'])
                 vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
                 disp_m = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
+                
+                # Dinamismo forzado del límite según prestigio[cite: 1]
                 max_posible = min(disp_m, int(prestigio))
                 
                 if max_posible > 0:
-                    opciones_validas = [o for o in [1, 5, 10, 25, 50, 75, 100] if o <= max_posible]
-                    if not opciones_validas: opciones_validas = [max_posible]
+                    # Generamos opciones basadas en el prestigio actual[cite: 1]
+                    opciones_base = [1, 5, 10, 25, 50, 75, 100]
+                    opciones_validas = sorted(list(set([o for o in opciones_base if o <= max_posible] + [max_posible])))
                     
-                    pct = c2.select_slider("Porcentaje a adquirir:", opciones_validas)
+                    # El key dinámico asegura que el widget se destruya y recree si cambia el límite[cite: 1]
+                    pct = c2.select_slider("Porcentaje a adquirir:", options=opciones_validas, key=f"slider_{nom}_{prestigio}")
+                    
                     costo_f = (v_m_t * pct) / 100
                     inv = costo_f + (v_m_t * 0.02)
                     
@@ -155,6 +162,8 @@ with st.expander("🔍 Scouting y Mercado"):
                             ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                             ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                             st.rerun()
+                else: 
+                    st.error(f"Stock insuficiente o tu prestigio ({prestigio} pts) no permite comprar más.")
 
 # --- 7. MIS REPRESENTADOS ---
 st.markdown("### 📋 Mis Representados")
@@ -169,13 +178,12 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
         match_info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
         if not match_info.empty:
             score_e = match_info['ScoreOficial'].values[0]
-            equipo = match_info.iloc[0, 1] # Equipo[cite: 1]
-            posicion = match_info.iloc[0, 2] # POS[cite: 1]
+            equipo = match_info.iloc[0, 1]
+            posicion = match_info.iloc[0, 2]
 
     with st.container(border=True):
         col1, col2 = st.columns([3, 1])
         with col1:
-            # Reducimos el tamaño del equipo con la etiqueta <small>[cite: 1]
             st.markdown(f"#### {j_nom} <small>({equipo})</small>", unsafe_allow_html=True)
             st.markdown(f"{posicion} | {int(j_pct)}%")
             st.write(f"Inversión: € {formatear_total(j_costo)} | Último Score: {score_e}")
