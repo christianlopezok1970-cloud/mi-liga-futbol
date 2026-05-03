@@ -34,7 +34,6 @@ def cargar_datos_completos_google():
         return df
     except: return pd.DataFrame()
 
-# Tablas base
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, presupuesto REAL, prestigio INTEGER)''', commit=True)
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
@@ -95,26 +94,34 @@ if not df_oficial.empty:
                     cambio = True
     if cambio: st.rerun()
 
-# --- 5. SIDEBAR (MÉTRICAS + PRÉSTAMO) ---
+# --- 5. SIDEBAR (MÉTRICAS + PRÉSTAMO CON PENALIZACIÓN) ---
 st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
 with st.sidebar.expander("🏦 Préstamo Bancario"):
-    monto_p = st.number_input("Monto (€):", min_value=0, step=50000)
-    if st.button("Solicitar Préstamo"):
-        if monto_p > 0:
-            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (monto_p, u_id), commit=True)
-            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, "Préstamo Bancario", monto_p, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+    st.caption("⚠️ Cada € 100.000 reducen -1 de Reputación.")
+    monto_p = st.number_input("Monto a solicitar (€):", min_value=0, step=100000)
+    if st.button("Confirmar Préstamo"):
+        if monto_p >= 100000:
+            costo_prestigio = int(monto_p / 100000)
+            nueva_reputacion = max(0, prestigio - costo_prestigio)
+            
+            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = ? WHERE id = ?", (monto_p, nueva_reputacion, u_id), commit=True)
+            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                        (u_id, f"Préstamo (Penalización: -{costo_prestigio} Rep)", monto_p, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+            st.success(f"Crédito otorgado. Reputación actual: {nueva_reputacion}")
             st.rerun()
+        else:
+            st.warning("El monto mínimo es € 100.000")
 
 if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
-    if st.sidebar.button("EJECUTAR RESET TOTAL"):
+    if st.sidebar.button("RESET TOTAL"):
         ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
         ejecutar_db("DELETE FROM historial WHERE usuario_id = ?", (u_id,), commit=True)
         ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
         st.rerun()
 
-# --- 6. SCOUTING Y MERCADO ---
+# --- 6. SCOUTING Y MERCADO (REACTIVO AL PRESTIGIO) ---
 with st.expander("🔍 Scouting y Mercado"):
     if not df_oficial.empty:
         c1, c2 = st.columns(2)
@@ -124,13 +131,16 @@ with st.expander("🔍 Scouting y Mercado"):
             nom = dj.iloc[0]
             v_m_t = int(dj['ValorNum'])
             
+            # Stock disponible
             vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
             disp_m = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
+            
+            # Límite por prestigio[cite: 1]
             max_posible = min(disp_m, int(prestigio))
             
             if max_posible > 0:
                 opciones = sorted(list(set([o for o in [1, 5, 10, 25, 50, 75, 100] if o <= max_posible] + [max_posible])))
-                # El key incluye 'prestigio' para forzar el refresco del slider[cite: 1]
+                # El key con prestigio asegura que el slider se actualice tras un préstamo[cite: 1]
                 pct = c2.select_slider("Porcentaje:", options=opciones, key=f"s_{nom}_{prestigio}")
                 costo_f = (v_m_t * pct) / 100
                 inv = costo_f + (v_m_t * 0.02)
@@ -142,7 +152,8 @@ with st.expander("🔍 Scouting y Mercado"):
                         ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv, u_id), commit=True)
                         ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                         st.rerun()
-            else: st.warning("Prestigio insuficiente o sin stock.")
+            else:
+                st.error(f"Tu Reputación ({prestigio} pts) es demasiado baja para comprar este porcentaje o no hay stock.")
 
 # --- 7. MIS REPRESENTADOS ---
 st.markdown("### 📋 Mis Representados")
