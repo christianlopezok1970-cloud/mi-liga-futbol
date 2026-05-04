@@ -110,7 +110,23 @@ else:
         st.error("❌ Contraseña incorrecta.")
         st.stop()
 
+# 1. Primero actualiza la llamada a la función (asegúrate de recibir las dos variables)
 df_oficial, estado_mercado = cargar_datos_completos_google()
+
+st.subheader("🔍 Mercado de Fichajes")
+
+# 2. Usa el estado_mercado que leíste del Excel
+if estado_mercado == "CERRADO":
+    # Si J1 es CERRADO, bloqueas el acceso
+    st.error("🚨 EL MERCADO ESTÁ ACTUALMENTE CERRADO. No se permiten nuevas contrataciones.")
+else:
+    # Si J1 está vacío o dice ABIERTO, muestras tu buscador de siempre
+    with st.expander("🔍 Scouting y Mercado"):
+        # AQUÍ DENTRO DEBES TENER TU CÓDIGO DE:
+        # seleccion = st.selectbox(...)
+        # if seleccion:
+        #    ... toda tu lógica de fichar ...
+        pass
 
 # --- 4. PROCESAMIENTO AUTOMÁTICO[cite: 3] ---
 if not df_oficial.empty:
