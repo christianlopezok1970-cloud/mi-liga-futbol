@@ -29,21 +29,34 @@ def formatear_total(monto):
     try: return f"{int(float(monto)):,}".replace(',', '.')
     except: return "0"
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60) # Bajamos a 60 para que no tarde 5 min en detectar el cierre
 def cargar_datos_completos_google():
     try:
         df = pd.read_csv(SHEET_URL)
         df.columns = [c.strip() for c in df.columns]
+
+        # --- NUEVA LÓGICA DE MERCADO (CELDA J1) ---
+        estado_mercado = "ABIERTO"
+        if len(df.columns) >= 10:  # Si el Excel tiene al menos hasta la columna J
+            valor_j1 = str(df.iloc[0, 9]).upper().strip() # Fila 0, Columna 9 (J)
+            if "CERRADO" in valor_j1:
+                estado_mercado = "CERRADO"
+        # ------------------------------------------
+
         def limpiar_valor(val):
             try:
                 s = str(val).replace('.','').replace(',','')
                 return int(''.join(filter(str.isdigit, s)))
             except: return 1000000
+
         df['ValorNum'] = df.iloc[:, 3].apply(limpiar_valor)
         df['Display'] = df.iloc[:, 0] + " (" + df.iloc[:, 1] + ") - € " + df['ValorNum'].apply(formatear_abreviado) + " [" + df.iloc[:, 2] + "]"
         df['ScoreOficial'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
-        return df
-    except: return pd.DataFrame()
+        
+        # IMPORTANTE: Ahora devolvemos dos cosas
+        return df, estado_mercado 
+    except: 
+        return pd.DataFrame(), "ABIERTO"
 
 # Tablas (Añadimos PASSWORD)[cite: 1, 3]
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
@@ -97,7 +110,7 @@ else:
         st.error("❌ Contraseña incorrecta.")
         st.stop()
 
-df_oficial = cargar_datos_completos_google()
+df_oficial, estado_mercado = cargar_datos_completos_google()
 
 # --- 4. PROCESAMIENTO AUTOMÁTICO[cite: 3] ---
 if not df_oficial.empty:
