@@ -73,7 +73,7 @@ st.markdown("""
     <style>
     /* Fondo principal */
     .stApp {
-        background: linear-gradient(180deg, #001633 0%, #000814 100%);
+        background: linear-gradient(180deg, #0e0a63 0%, #000814 100%);
     }
     
     /* Color de los textos para que resalten */
