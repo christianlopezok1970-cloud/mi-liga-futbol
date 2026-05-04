@@ -68,6 +68,47 @@ def calcular_cambio_prestigio(pts):
     if p <= 6.7: return -1
     return 0
 
+# --- ESTILO AZUL CHAMPIONS ---
+st.markdown("""
+    <style>
+    /* Fondo principal */
+    .stApp {
+        background: linear-gradient(180deg, #001633 0%, #000814 100%);
+    }
+    
+    /* Color de los textos para que resalten */
+    h1, h2, h3, h4, p, span, label {
+        color: #f0f2f6 !important;
+    }
+
+    /* Estilo para las tarjetas de los jugadores */
+    div[data-testid="stVerticalBlock"] > div[style*="border"] {
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid #003366 !important;
+        border-radius: 10px;
+    }
+
+    /* Sidebar con un azul un poco más oscuro */
+    section[data-testid="stSidebar"] {
+        background-color: #000b1a;
+    }
+    
+    /* Botones estilo premium */
+    .stButton>button {
+        background-color: #004494;
+        color: white;
+        border-radius: 5px;
+        border: none;
+    }
+    
+    .stButton>button:hover {
+        background-color: #005bc4;
+        border: none;
+        color: white;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # --- 3. INTERFAZ E INICIO DE SESIÓN ---
 st.set_page_config(page_title="Pro Fútbol Manager v40", layout="wide")
 st.subheader("Pro Fútbol Manager")
