@@ -73,7 +73,7 @@ st.markdown("""
     <style>
     /* Fondo principal */
     .stApp {
-        background: linear-gradient(180deg, #0e0a63 0%, #000814 100%);
+        background: linear-gradient(180deg, #001633 0%, #000814 100%);
     }
     
     /* Color de los textos para que resalten */
@@ -83,14 +83,14 @@ st.markdown("""
 
     /* Estilo para las tarjetas de los jugadores */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        background-color: rgba(255, 255, 255, 0.02);
-        border: 1px solid #030254 !important;
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid #003366 !important;
         border-radius: 10px;
     }
 
     /* Sidebar con un azul un poco más oscuro */
     section[data-testid="stSidebar"] {
-        background-color: #030230;
+        background-color: #000b1a;
     }
     
     /* Botones estilo premium */
@@ -193,7 +193,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
 if mercado_bloqueado:
     st.error("🚨 EL MERCADO ESTÁ ACTUALMENTE CERRADO. No se permiten nuevas contrataciones.")
 else:
-    with st.expander("🔍 Mercado"):
+    with st.expander("🔍 Scouting y Mercado"):
         if not df_oficial.empty:
             c1, c2 = st.columns(2)
             seleccion = c1.selectbox("Buscar Jugador:", options=[""] + df_oficial['Display'].tolist())
@@ -232,7 +232,7 @@ else:
                         st.error("Reputación insuficiente.")
 
 # --- 7. MIS REPRESENTADOS ---
-st.markdown('<p style="color: #00FFFF; font-size: 22px; font-weight: bold; margin-bottom: -10px;">📋 Mis Representados</p>', unsafe_allow_html=True)
+st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
@@ -241,8 +241,8 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.markdown(f'### <span style="color: #117785;">{j_nom}</span> <span style="color: #117785; font-size: 14.5px;">({j_club})</span>', unsafe_allow_html=True)
-            st.markdown(f"**Ficha:** {int(j_pct)}%")
+            st.markdown(f"#### {j_nom} <small>({j_club})</small>", unsafe_allow_html=True)
+            st.markdown(f"**Participación:** {int(j_pct)}%")
             st.write(f"Inversión: € {formatear_total(j_costo)} | Score: {score}")
         with c2:
             confirmar_v = st.checkbox("Confirmar Venta", key=f"chk_{j_id}")
@@ -264,3 +264,4 @@ with c_hist:
     with st.expander("📜 Historial"):
         h = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 15", (u_id,))
         st.dataframe(pd.DataFrame(h, columns=['Fecha', 'Evento', 'Monto']), hide_index=True)
+
