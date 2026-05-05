@@ -90,7 +90,7 @@ st.markdown("""
 
     /* Sidebar con un azul un poco más oscuro */
     section[data-testid="stSidebar"] {
-        background-color: #051833;
+        background-color: #070580;
     }
     
     /* Botones estilo premium */
