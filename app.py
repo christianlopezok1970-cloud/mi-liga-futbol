@@ -241,7 +241,7 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.markdown(f'#### <span style="color: #FFD700;">{j_nom}</span> <span style="color: #CCCCCC; font-size: 13px;">({j_club})</span>', unsafe_allow_html=True)
+            st.markdown(f'#### <span style="color: #FFD700;">{j_nom}</span> <span style="color: #CCCCCC; font-size: 14px;">({j_club})</span>', unsafe_allow_html=True)
             st.markdown(f"**Ficha:** {int(j_pct)}%")
             st.write(f"Inversión: € {formatear_total(j_costo)} | Score: {score}")
         with c2:
