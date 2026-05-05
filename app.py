@@ -232,7 +232,7 @@ else:
                         st.error("Reputación insuficiente.")
 
 # --- 7. MIS REPRESENTADOS ---
-st.markdown('<h2 style="color: #00FFFF; font-weight: bold;">📋 Mis Representados</h2>', unsafe_allow_html=True)
+st.markdown('<p style="color: #00FFFF; font-size: 20px; font-weight: bold; margin-bottom: -10px;">📋 Mis Representados</p>', unsafe_allow_html=True)
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
