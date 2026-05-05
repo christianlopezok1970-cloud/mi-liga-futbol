@@ -193,7 +193,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
 if mercado_bloqueado:
     st.error("🚨 EL MERCADO ESTÁ ACTUALMENTE CERRADO. No se permiten nuevas contrataciones.")
 else:
-    with st.expander("🔍 Scouting y Mercado"):
+    with st.expander("🔍 Mercado"):
         if not df_oficial.empty:
             c1, c2 = st.columns(2)
             seleccion = c1.selectbox("Buscar Jugador:", options=[""] + df_oficial['Display'].tolist())
@@ -241,8 +241,8 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.markdown(f"#### {j_nom} <small>({j_club})</small>", unsafe_allow_html=True)
-            st.markdown(f"**Participación:** {int(j_pct)}%")
+            st.markdown(f'#### <span style="color: #FFD700;">{j_nom}</span> <span style="color: #CCCCCC; font-size: 15px;">({j_club})</span>', unsafe_allow_html=True)
+            st.markdown(f"**Ficha:** {int(j_pct)}%")
             st.write(f"Inversión: € {formatear_total(j_costo)} | Score: {score}")
         with c2:
             confirmar_v = st.checkbox("Confirmar Venta", key=f"chk_{j_id}")
