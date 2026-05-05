@@ -83,7 +83,7 @@ st.markdown("""
 
     /* Estilo para las tarjetas de los jugadores */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        background-color: rgba(255, 255, 255, 0.1);
+        background-color: rgba(255, 255, 255, 0.2);
         border: 1px solid #003366 !important;
         border-radius: 10px;
     }
