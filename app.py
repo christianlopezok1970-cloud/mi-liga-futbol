@@ -241,8 +241,8 @@ for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.markdown(f"#### {j_nom} <small>({j_club})</small>", unsafe_allow_html=True)
-            st.markdown(f"**Participación:** {int(j_pct)}%")
+            st.markdown(f'#### <span style="color: #00D4FF; text-shadow: 0px 0px 10px rgba(0,212,255,0.5);">{j_nom}</span> <small style="color: #f0f2f6;">({j_club})</small>', unsafe_allow_html=True)
+            st.markdown(f"**Ficha:** {int(j_pct)}%")
             st.write(f"Inversión: € {formatear_total(j_costo)} | Score: {score}")
         with c2:
             confirmar_v = st.checkbox("Confirmar Venta", key=f"chk_{j_id}")
