@@ -125,7 +125,7 @@ if not manager or not password:
 datos = ejecutar_db("SELECT id, presupuesto, prestigio, password FROM usuarios WHERE nombre = ?", (manager,))
 
 if not datos:
-    ejecutar_db("INSERT INTO usuarios (nombre, password, presupuesto, prestigio) VALUES (?, ?, 2000000, 10)", (manager, password), commit=True)
+    ejecutar_db("INSERT INTO usuarios (nombre, password, presupuesto, prestigio) VALUES (?, ?, 30000000, 10)", (manager, password), commit=True)
     st.success(f"Cuenta creada para {manager}. ¡Bienvenido!")
     st.rerun()
 else:
@@ -169,11 +169,11 @@ st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
 
 with st.sidebar.expander("🏦 Préstamo Bancario"):
-    st.caption("€ 100.000 = -1 de Reputación")
-    monto_p = st.number_input("Monto (€):", min_value=0, step=100000)
+    st.caption("€ 1.000.000 = -1 de Reputación")
+    monto_p = st.number_input("Monto (€):", min_value=0, step=1000000)
     if st.button("Confirmar Préstamo"):
-        if monto_p >= 100000:
-            costo_rep = int(monto_p / 100000)
+        if monto_p >= 1000000:
+            costo_rep = int(monto_p / 1000000)
             if prestigio >= costo_rep:
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio - ? WHERE id = ?", (monto_p, costo_rep, u_id), commit=True)
                 ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Préstamo (-{costo_rep} Rep)", monto_p, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
@@ -186,7 +186,7 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
     if st.sidebar.button("RESET TOTAL"):
         ejecutar_db("DELETE FROM cartera WHERE usuario_id = ?", (u_id,), commit=True)
         ejecutar_db("DELETE FROM historial WHERE usuario_id = ?", (u_id,), commit=True)
-        ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
+        ejecutar_db("UPDATE usuarios SET presupuesto = 30000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
         st.rerun()
 
 # --- 6. SCOUTING DE ALTO RIESGO (2.5M) ---
@@ -202,7 +202,7 @@ else:
     
     with col_scout1:
         st.info(f"**Operación de Scouting:** Envía ojeadores a cerrar un contrato internacional.\n\n**Inversión Única:** € {formatear_total(COSTO_OPERATIVO)}")
-        st.caption("Nota: Recibirás el 100% del jugador obtenido, independientemente de su valor de mercado.")
+        st.caption("Nota: Recibirás el 100% del jugador obtenido.")
     
     with col_scout2:
         if not st.session_state.get('confirmar_scouting', False):
@@ -260,7 +260,7 @@ else:
                 st.session_state.confirmar_scouting = False
                 st.rerun()
 # --- 7. MIS REPRESENTADOS ---
-st.markdown("### 📋 Mis Representados")
+st.markdown("### Mis Jugadores")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 for j_id, j_nom, j_pct, j_costo, j_club in cartera:
     info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
