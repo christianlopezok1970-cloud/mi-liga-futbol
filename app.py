@@ -189,48 +189,65 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
         ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
         st.rerun()
 
-# --- 6. SCOUTING Y MERCADO ---
+# --- 6. SCOUTING AZAR 100% (Gacha Style) ---
 if mercado_bloqueado:
-    st.error("🚨 EL MERCADO ESTÁ ACTUALMENTE CERRADO. No se permiten nuevas contrataciones.")
+    st.error("🚨 EL MERCADO ESTÁ ACTUALMENTE CERRADO.")
 else:
-    with st.expander("🔍 Scouting y Mercado"):
-        if not df_oficial.empty:
-            c1, c2 = st.columns(2)
-            seleccion = c1.selectbox("Buscar Jugador:", options=[""] + df_oficial['Display'].tolist())
-            if seleccion:
-                dj = df_oficial[df_oficial['Display'] == seleccion].iloc[0]
-                nom = dj.iloc[0]
-                
-                ya_lo_tiene = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
-                if ya_lo_tiene:
-                    st.warning(f"⚠️ Ya representas a {nom}.")
-                else:
-                    v_m_t = int(dj['ValorNum'])
-                    vendido_p = ejecutar_db("SELECT SUM(porcentaje) FROM cartera WHERE nombre_jugador = ?", (nom,))
-                    stock_disponible = 100 - (vendido_p[0][0] if vendido_p[0][0] else 0)
-                    
-                    max_fichaje = min(stock_disponible, int(prestigio))
-                    
-                    if max_fichaje > 0:
-                        opciones_fichaje = [o for o in [1, 5, 10, 25, 50, 75, 100] if o <= max_fichaje]
-                        if not opciones_fichaje or max_fichaje not in opciones_fichaje:
-                            opciones_fichaje.append(max_fichaje)
-                        opciones_fichaje = sorted(list(set(opciones_fichaje)))
-
-                        pct = c2.select_slider("Porcentaje a adquirir:", opciones_fichaje)
-                        costo_f = (v_m_t * pct) / 100
-                        inv_total = costo_f + (v_m_t * 0.02)
+    st.markdown("### 🎲 Centro de Scouting")
+    
+    # Configuramos un costo de scouting acorde a buscar un jugador completo
+    COSTO_SCOUTING = 250000  # Puedes ajustar este valor (ej: 250k por tirada)
+    
+    col_scout1, col_scout2 = st.columns([2, 1])
+    
+    with col_scout1:
+        st.info(f"**Misión de Scouting:** Envía a tus ojeadores a negociar el 100% de una ficha.\n\n**Inversión Requerida:** € {formatear_total(COSTO_SCOUTING)}")
+    
+    with col_scout2:
+        if not st.session_state.get('confirmar_scouting', False):
+            if st.button("🔭 ENVIAR SCOUTS", use_container_width=True):
+                st.session_state.confirmar_scouting = True
+                st.rerun()
+        else:
+            st.warning("¿Confirmar inversión?")
+            c_si, c_no = st.columns(2)
+            
+            if c_si.button("✅ SÍ", type="primary", use_container_width=True):
+                if presupuesto >= COSTO_SCOUTING:
+                    if not df_oficial.empty:
+                        # 1. Elegir jugador al azar
+                        jugador_azar = df_oficial.sample(n=1).iloc[0]
+                        nom = jugador_azar.iloc[0].strip()
+                        club_j = jugador_azar.iloc[1]
                         
-                        st.info(f"Ficha: € {formatear_total(costo_f)} | Gastos Admin (2%): € {formatear_total(v_m_t * 0.02)}")
-                        if st.button("FICHAR JUGADOR", type="primary"):
-                            if presupuesto >= inv_total:
-                                ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)", (u_id, nom, pct, costo_f, dj.iloc[1]), commit=True)
-                                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (inv_total, u_id), commit=True)
-                                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Compra {pct}% {nom}", -inv_total, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                                st.rerun()
-                    else:
-                        st.error("Reputación insuficiente.")
+                        # 2. Verificar disponibilidad
+                        ya_lo_tiene = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
+                        
+                        if ya_lo_tiene:
+                            st.toast(f"⚠️ Mala suerte: Los scouts contactaron a {nom}, pero ya es tu representado.")
+                        else:
+                            # 3. Fichar al 100%
+                            ejecutar_db("""INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) 
+                                        VALUES (?, ?, 100, ?, ?)""", 
+                                        (u_id, nom, COSTO_SCOUTING, club_j), commit=True)
+                            
+                            # 4. Descontar y registrar
+                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (COSTO_SCOUTING, u_id), commit=True)
+                            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                                        (u_id, f"Fichaje 100%: {nom}", -COSTO_SCOUTING, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                            
+                            st.balloons()
+                            st.success(f"¡ÉXITO! Has adquirido el 100% de la ficha de **{nom}**")
+                    
+                    st.session_state.confirmar_scouting = False
+                    st.rerun()
+                else:
+                    st.error("Presupuesto insuficiente.")
+                    st.session_state.confirmar_scouting = False
 
+            if c_no.button("❌ NO", use_container_width=True):
+                st.session_state.confirmar_scouting = False
+                st.rerun()
 # --- 7. MIS REPRESENTADOS ---
 st.markdown("### 📋 Mis Representados")
 cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
