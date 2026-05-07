@@ -260,6 +260,7 @@ else:
                 st.session_state.confirmar_scouting = False
                 st.rerun()
 # --- 7. MIS REPRESENTADOS (ORGANIZADOS POR POSICIÓN) ---
+# --- 7. MIS REPRESENTADOS (CON RED DE SEGURIDAD) ---
 st.markdown("### 📋 Cartera de Representados")
 
 # Obtenemos los jugadores del usuario
@@ -268,51 +269,61 @@ cartera = ejecutar_db("SELECT id, nombre_jugador, costo_compra, club FROM carter
 if not cartera:
     st.info("Aún no tienes jugadores representados. Ve al Centro de Scouting.")
 else:
-    # Definimos el orden y mapeo de las posiciones
-    posiciones_orden = ["ARQ", "DEF", "VOL", "DEL"]
-    titulos_pos = {"ARQ": "🧤 Arqueros", "DEF": "🛡️ Defensores", "VOL": "⚙️ Volantes", "DEL": "🏹 Delanteros"}
+    # Definimos las posiciones estándar
+    posiciones_orden = ["ARQ", "DEF", "VOL", "DEL", "OTRO"]
+    titulos_pos = {
+        "ARQ": "🧤 Arqueros", 
+        "DEF": "🛡️ Defensores", 
+        "VOL": "⚙️ Volantes", 
+        "DEL": "🏹 Delanteros",
+        "OTRO": "❓ Otros"
+    }
     
-    # Creamos un diccionario para organizar a los jugadores por su posición real del Excel
+    # Organizamos la cartera
     cartera_organizada = {pos: [] for pos in posiciones_orden}
     
     for j_id, j_nom, j_valor, j_club in cartera:
-        # Buscamos la posición en el dataframe oficial (df_oficial)
-        info_excel = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
-        pos_jugador = info_excel.iloc[0, 1].strip().upper() if not info_excel.empty else "VOL" # Default por si falla
+        # Buscamos en el df_oficial ignorando espacios y mayúsculas
+        nombre_limpio = j_nom.strip().upper()
+        info_excel = df_oficial[df_oficial.iloc[:, 0].str.strip().str.upper() == nombre_limpio]
         
-        if pos_jugador in cartera_organizada:
-            cartera_organizada[pos_jugador].append({
-                "id": j_id, "nombre": j_nom, "valor": j_valor, "club": j_club
-            })
+        if not info_excel.empty:
+            pos_jugador = str(info_excel.iloc[0, 1]).strip().upper()
+            # Si la posición del Excel no está en nuestra lista, va a OTRO
+            if pos_jugador in cartera_organizada:
+                dest = pos_jugador
+            else:
+                dest = "OTRO"
+        else:
+            # Si el jugador no se encuentra en el Excel actual
+            dest = "OTRO"
+            
+        cartera_organizada[dest].append({
+            "id": j_id, "nombre": j_nom, "valor": j_valor, "club": j_club
+        })
 
-    # Dibujamos las columnas por posición
-    cols_pos = st.columns(4)
+    # Dibujamos 5 columnas (incluyendo la de emergencia)
+    cols_pos = st.columns(5)
     
     for i, pos_key in enumerate(posiciones_orden):
         with cols_pos[i]:
-            st.markdown(f"#### {titulos_pos[pos_key]}")
-            jugadores_en_pos = cartera_organizada[pos_key]
-            
-            if not jugadores_en_pos:
-                st.caption("Sin representantes")
-            
-            for jug in jugadores_en_pos:
-                with st.container(border=True):
-                    st.markdown(f"**{jug['nombre']}**")
-                    st.caption(f"{jug['club']}")
-                    
-                    # Cambio: "Inversión" por "Valor" y quitamos el %
-                    st.write(f"Valor: € {formatear_total(jug['valor'])}")
-                    
-                    # Botón de Venta integrado
-                    conf_v = st.checkbox("Confirmar", key=f"v_chk_{jug['id']}")
-                    valor_salida = jug['valor'] * 0.99
-                    if st.button(f"VENDER", key=f"v_btn_{jug['id']}", disabled=not conf_v, use_container_width=True):
-                        ejecutar_db("DELETE FROM cartera WHERE id = ?", (jug['id'],), commit=True)
-                        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_salida, u_id), commit=True)
-                        ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                                    (u_id, f"Venta {jug['nombre']}", valor_salida, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                        st.rerun()
+            # Solo mostramos el título si hay jugadores en esa categoría
+            if len(cartera_organizada[pos_key]) > 0:
+                st.markdown(f"#### {titulos_pos[pos_key]}")
+                for jug in cartera_organizada[pos_key]:
+                    with st.container(border=True):
+                        st.markdown(f"**{jug['nombre']}**")
+                        st.caption(f"{jug['club']}")
+                        st.write(f"Valor: € {formatear_total(jug['valor'])}")
+                        
+                        conf_v = st.checkbox("Confirmar", key=f"v_chk_{jug['id']}")
+                        valor_salida = jug['valor'] * 0.99
+                        if st.button(f"VENDER", key=f"v_btn_{jug['id']}", disabled=not conf_v, use_container_width=True):
+                            ejecutar_db("DELETE FROM cartera WHERE id = ?", (jug['id'],), commit=True)
+                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_salida, u_id), commit=True)
+                            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                                        (u_id, f"Venta {jug['nombre']}", valor_salida, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                            st.rerun()
 
 # --- 8. RANKING E HISTORIAL ---
 st.divider()
