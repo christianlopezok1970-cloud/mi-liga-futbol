@@ -28,7 +28,7 @@ def formatear_total(monto):
     try: return f"{int(float(monto)):,}".replace(',', '.')
     except: return "0"
 
-@st.cache_data(ttl=60) # Reducido a 60 para detectar el cierre más rápido
+@st.cache_data(ttl=60)
 def cargar_datos_completos_google():
     try:
         df = pd.read_csv(SHEET_URL)
@@ -71,46 +71,21 @@ def calcular_cambio_prestigio(pts):
 # --- ESTILO AZUL CHAMPIONS ---
 st.markdown("""
     <style>
-    /* Fondo principal */
-    .stApp {
-        background: linear-gradient(180deg, #001633 0%, #000814 100%);
-    }
-    
-    /* Color de los textos para que resalten */
-    h1, h2, h3, h4, p, span, label {
-        color: #f0f2f6 !important;
-    }
-
-    /* Estilo para las tarjetas de los jugadores */
+    .stApp { background: linear-gradient(180deg, #001633 0%, #000814 100%); }
+    h1, h2, h3, h4, p, span, label { color: #f0f2f6 !important; }
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
         background-color: rgba(255, 255, 255, 0.05);
         border: 1px solid #003366 !important;
         border-radius: 10px;
     }
-
-    /* Sidebar con un azul un poco más oscuro */
-    section[data-testid="stSidebar"] {
-        background-color: #000b1a;
-    }
-    
-    /* Botones estilo premium */
-    .stButton>button {
-        background-color: #004494;
-        color: white;
-        border-radius: 5px;
-        border: none;
-    }
-    
-    .stButton>button:hover {
-        background-color: #005bc4;
-        border: none;
-        color: white;
-    }
+    section[data-testid="stSidebar"] { background-color: #000b1a; }
+    .stButton>button { background-color: #004494; color: white; border-radius: 5px; border: none; }
+    .stButton>button:hover { background-color: #005bc4; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- 3. INTERFAZ E INICIO DE SESIÓN ---
-st.set_page_config(page_title="Pro Fútbol Manager v40", layout="wide")
+st.set_page_config(page_title="Pro Fútbol Manager v41", layout="wide")
 st.subheader("Pro Fútbol Manager")
 
 with st.sidebar:
@@ -136,7 +111,7 @@ else:
 
 df_oficial = cargar_datos_completos_google()
 
-# --- LÓGICA DE CIERRE DE MERCADO (SIMPLE Y SEGURA) ---
+# --- LÓGICA DE CIERRE DE MERCADO ---
 mercado_bloqueado = False
 if not df_oficial.empty and len(df_oficial.columns) >= 10:
     estado_j1 = str(df_oficial.iloc[0, 9]).strip().upper()
@@ -159,27 +134,13 @@ if not df_oficial.empty:
                     pres_mod = calcular_cambio_prestigio(pts_oficial)
                     ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio + ? WHERE id = ?", (bal, pres_mod, u_id), commit=True)
                     ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, check_detalle, bal, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                    st.toast(f"✅ Jornada procesada: {j_nom}")
     
     datos = ejecutar_db("SELECT id, presupuesto, prestigio, password FROM usuarios WHERE id = ?", (u_id,))
     u_id, presupuesto, prestigio, _ = datos[0]
 
-# --- 5. SIDEBAR (Métricas + Préstamo) ---
+# --- 5. SIDEBAR (Métricas) ---
 st.sidebar.metric("Caja Global", f"€ {formatear_total(presupuesto)}")
 st.sidebar.metric("Reputación", f"{prestigio} pts")
-
-with st.sidebar.expander("🏦 Préstamo Bancario"):
-    st.caption("€ 1.000.000 = -1 de Reputación")
-    monto_p = st.number_input("Monto (€):", min_value=0, step=1000000)
-    if st.button("Confirmar Préstamo"):
-        if monto_p >= 1000000:
-            costo_rep = int(monto_p / 1000000)
-            if prestigio >= costo_rep:
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ?, prestigio = prestigio - ? WHERE id = ?", (monto_p, costo_rep, u_id), commit=True)
-                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Préstamo (-{costo_rep} Rep)", monto_p, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                st.rerun()
-            else:
-                st.error("Reputación insuficiente.")
 
 st.sidebar.divider()
 if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
@@ -189,107 +150,71 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
         ejecutar_db("UPDATE usuarios SET presupuesto = 30000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
         st.rerun()
 
-# --- 6. SCOUTING DE ALTO RIESGO (2.5M) ---
+# --- 6. SCOUTING AZAR (2.5M) ---
 if mercado_bloqueado:
-    st.error("🚨 EL MERCADO ESTÁ ACTUALMENTE CERRADO.")
+    st.error("🚨 EL MERCADO ESTÁ CERRADO.")
 else:
     st.markdown("### 🎲 Centro de Scouting Premium")
-    
-    # Inversión fija de 2.5 Millones
     COSTO_OPERATIVO = 2500000 
-    
     col_scout1, col_scout2 = st.columns([2, 1])
-    
     with col_scout1:
-        st.info(f"**Operación de Scouting:** Envía ojeadores a cerrar un contrato internacional.\n\n**Inversión Única:** € {formatear_total(COSTO_OPERATIVO)}")
-        st.caption("Nota: Recibirás el 100% del jugador obtenido.")
-    
+        st.info(f"**Inversión Única:** € {formatear_total(COSTO_OPERATIVO)}")
     with col_scout2:
         if not st.session_state.get('confirmar_scouting', False):
             if st.button("🔭 LANZAR BÚSQUEDA", use_container_width=True):
                 st.session_state.confirmar_scouting = True
                 st.rerun()
         else:
-            st.warning(f"¿Gastar € {formatear_total(COSTO_OPERATIVO)}?")
-            c_si, c_no = st.columns(2)
-            
-            if c_si.button("✅ CONFIRMAR", type="primary", use_container_width=True):
+            if st.button("✅ CONFIRMAR 2.5M", type="primary", use_container_width=True):
                 if presupuesto >= COSTO_OPERATIVO:
-                    if not df_oficial.empty:
-                        # 1. Elegir jugador al azar
-                        jugador_azar = df_oficial.sample(n=1).iloc[0]
-                        nom = jugador_azar.iloc[0].strip()
-                        club_j = jugador_azar.iloc[1]
-                        valor_mercado_real = int(jugador_azar['ValorNum']) # El valor del Excel
-                        
-                        # 2. Verificar si ya lo tiene
-                        ya_lo_tiene = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
-                        
-                        if ya_lo_tiene:
-                            st.error(f"❌ Los scouts encontraron a {nom}, pero ya es tu representado. La operación falló y se perdió la inversión.")
-                            # Igual descontamos el dinero porque la operación se realizó
-                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (COSTO_OPERATIVO, u_id), commit=True)
-                        else:
-                            # 3. Fichar al 100% guardando el valor REAL del jugador
-                            # Usamos valor_mercado_real para que la venta sea por lo que vale el jugador
-                            ejecutar_db("""INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) 
-                                        VALUES (?, ?, 100, ?, ?)""", 
-                                        (u_id, nom, valor_mercado_real, club_j), commit=True)
-                            
-                            # 4. Descontar inversión de 2.5M
-                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (COSTO_OPERATIVO, u_id), commit=True)
-                            
-                            # Registro en historial
-                            ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                                        (u_id, f"Scouting Premium: {nom}", -COSTO_OPERATIVO, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                            
-                            # Feedback según si fue buen o mal negocio
-                            if valor_mercado_real > COSTO_OPERATIVO:
-                                st.balloons()
-                                st.success(f"¡NEGOCIO EXCELENTE! {nom} vale € {formatear_total(valor_mercado_real)}")
-                            else:
-                                st.warning(f"Fichaje realizado: {nom} vale € {formatear_total(valor_mercado_real)}. (Pérdida de valor)")
-                    
+                    jugador_azar = df_oficial.sample(n=1).iloc[0]
+                    nom = jugador_azar.iloc[0].strip()
+                    valor_mercado = int(jugador_azar['ValorNum'])
+                    ya_lo_tiene = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
+                    if ya_lo_tiene:
+                        st.error(f"Ya tienes a {nom}. Inversión perdida.")
+                    else:
+                        ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?, ?, 100, ?, ?)", (u_id, nom, valor_mercado, jugador_azar.iloc[1]), commit=True)
+                        st.success(f"¡Fichado: {nom}!")
+                    ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (COSTO_OPERATIVO, u_id), commit=True)
                     st.session_state.confirmar_scouting = False
                     st.rerun()
-                else:
-                    st.error("Fondos insuficientes para esta operación.")
-                    st.session_state.confirmar_scouting = False
-
-            if c_no.button("❌ CANCELAR", use_container_width=True):
+            if st.button("❌ CANCELAR"):
                 st.session_state.confirmar_scouting = False
                 st.rerun()
-# --- 7. MIS REPRESENTADOS ---
-st.markdown("### Mis Jugadores")
-cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
-for j_id, j_nom, j_pct, j_costo, j_club in cartera:
-    info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
-    score = info['ScoreOficial'].values[0] if not info.empty else 0
-    
-    with st.container(border=True):
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            st.markdown(f'#### <span style="color: #00D4FF; text-shadow: 0px 0px 10px rgba(0,212,255,0.5);">{j_nom}</span> <small style="color: #f0f2f6;">({j_club})</small>', unsafe_allow_html=True)
-            st.markdown(f"**Ficha:** {int(j_pct)}%")
-            st.write(f"Inversión: € {formatear_total(j_costo)} | Score: {score}")
-        with c2:
-            confirmar_v = st.checkbox("Confirmar Venta", key=f"chk_{j_id}")
-            valor_salida = j_costo * 0.99
-            if st.button(f"VENDER €{formatear_total(valor_salida)}", key=f"btn_{j_id}", disabled=not confirmar_v):
-                ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_salida, u_id), commit=True)
-                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Venta {j_nom}", valor_salida, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                st.rerun()
+
+# --- 7. MIS REPRESENTADOS (POR POSICIÓN) ---
+st.markdown("### 📋 Mis Jugadores")
+cartera = ejecutar_db("SELECT id, nombre_jugador, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
+
+posiciones = ["ARQ", "DEF", "VOL", "DEL"]
+iconos = {"ARQ": "🧤 Arqueros", "DEF": "🛡️ Defensores", "VOL": "⚙️ Volantes", "DEL": "🏹 Delanteros"}
+cols = st.columns(4)
+
+for i, p_key in enumerate(posiciones):
+    with cols[i]:
+        st.markdown(f"**{iconos[p_key]}**")
+        for j_id, j_nom, j_costo, j_club in cartera:
+            info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
+            pos_real = info.iloc[0, 1].strip().upper() if not info.empty else "VOL"
+            if pos_real == p_key:
+                with st.container(border=True):
+                    st.markdown(f"**{j_nom}**")
+                    st.write(f"Valor: € {formatear_total(j_costo)}")
+                    if st.checkbox("Vender", key=f"chk_{j_id}"):
+                        if st.button("CONFIRMAR VENTA", key=f"btn_{j_id}"):
+                            ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
+                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_costo * 0.99, u_id), commit=True)
+                            st.rerun()
 
 # --- 8. RANKING E HISTORIAL ---
 st.divider()
-c_rank, c_hist = st.columns(2)
-with c_rank:
+c1, c2 = st.columns(2)
+with c1:
     with st.expander("🏆 Ranking"):
         res = ejecutar_db("SELECT nombre, prestigio, presupuesto FROM usuarios ORDER BY prestigio DESC")
         st.table(pd.DataFrame(res, columns=['Agente', 'Rep', 'Caja']))
-with c_hist:
+with c2:
     with st.expander("📜 Historial"):
-        h = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 15", (u_id,))
+        h = ejecutar_db("SELECT fecha, detalle, monto FROM historial WHERE usuario_id = ? ORDER BY id DESC LIMIT 10", (u_id,))
         st.dataframe(pd.DataFrame(h, columns=['Fecha', 'Evento', 'Monto']), hide_index=True)
-
