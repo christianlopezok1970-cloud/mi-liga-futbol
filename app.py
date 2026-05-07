@@ -189,63 +189,74 @@ if not st.sidebar.toggle("🔒 Bloquear Reset", value=True):
         ejecutar_db("UPDATE usuarios SET presupuesto = 2000000, prestigio = 10 WHERE id = ?", (u_id,), commit=True)
         st.rerun()
 
-# --- 6. SCOUTING AZAR 100% (Gacha Style) ---
+# --- 6. SCOUTING DE ALTO RIESGO (2.5M) ---
 if mercado_bloqueado:
     st.error("🚨 EL MERCADO ESTÁ ACTUALMENTE CERRADO.")
 else:
-    st.markdown("### 🎲 Centro de Scouting")
+    st.markdown("### 🎲 Centro de Scouting Premium")
     
-    # Configuramos un costo de scouting acorde a buscar un jugador completo
-    COSTO_SCOUTING = 250000  # Puedes ajustar este valor (ej: 250k por tirada)
+    # Inversión fija de 2.5 Millones
+    COSTO_OPERATIVO = 2500000 
     
     col_scout1, col_scout2 = st.columns([2, 1])
     
     with col_scout1:
-        st.info(f"**Misión de Scouting:** Envía a tus ojeadores a negociar el 100% de una ficha.\n\n**Inversión Requerida:** € {formatear_total(COSTO_SCOUTING)}")
+        st.info(f"**Operación de Scouting:** Envía ojeadores a cerrar un contrato internacional.\n\n**Inversión Única:** € {formatear_total(COSTO_OPERATIVO)}")
+        st.caption("Nota: Recibirás el 100% del jugador obtenido, independientemente de su valor de mercado.")
     
     with col_scout2:
         if not st.session_state.get('confirmar_scouting', False):
-            if st.button("🔭 ENVIAR SCOUTS", use_container_width=True):
+            if st.button("🔭 LANZAR BÚSQUEDA", use_container_width=True):
                 st.session_state.confirmar_scouting = True
                 st.rerun()
         else:
-            st.warning("¿Confirmar inversión?")
+            st.warning(f"¿Gastar € {formatear_total(COSTO_OPERATIVO)}?")
             c_si, c_no = st.columns(2)
             
-            if c_si.button("✅ SÍ", type="primary", use_container_width=True):
-                if presupuesto >= COSTO_SCOUTING:
+            if c_si.button("✅ CONFIRMAR", type="primary", use_container_width=True):
+                if presupuesto >= COSTO_OPERATIVO:
                     if not df_oficial.empty:
                         # 1. Elegir jugador al azar
                         jugador_azar = df_oficial.sample(n=1).iloc[0]
                         nom = jugador_azar.iloc[0].strip()
                         club_j = jugador_azar.iloc[1]
+                        valor_mercado_real = int(jugador_azar['ValorNum']) # El valor del Excel
                         
-                        # 2. Verificar disponibilidad
+                        # 2. Verificar si ya lo tiene
                         ya_lo_tiene = ejecutar_db("SELECT id FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, nom))
                         
                         if ya_lo_tiene:
-                            st.toast(f"⚠️ Mala suerte: Los scouts contactaron a {nom}, pero ya es tu representado.")
+                            st.error(f"❌ Los scouts encontraron a {nom}, pero ya es tu representado. La operación falló y se perdió la inversión.")
+                            # Igual descontamos el dinero porque la operación se realizó
+                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (COSTO_OPERATIVO, u_id), commit=True)
                         else:
-                            # 3. Fichar al 100%
+                            # 3. Fichar al 100% guardando el valor REAL del jugador
+                            # Usamos valor_mercado_real para que la venta sea por lo que vale el jugador
                             ejecutar_db("""INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) 
                                         VALUES (?, ?, 100, ?, ?)""", 
-                                        (u_id, nom, COSTO_SCOUTING, club_j), commit=True)
+                                        (u_id, nom, valor_mercado_real, club_j), commit=True)
                             
-                            # 4. Descontar y registrar
-                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (COSTO_SCOUTING, u_id), commit=True)
+                            # 4. Descontar inversión de 2.5M
+                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (COSTO_OPERATIVO, u_id), commit=True)
+                            
+                            # Registro en historial
                             ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
-                                        (u_id, f"Fichaje 100%: {nom}", -COSTO_SCOUTING, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                                        (u_id, f"Scouting Premium: {nom}", -COSTO_OPERATIVO, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
                             
-                            st.balloons()
-                            st.success(f"¡ÉXITO! Has adquirido el 100% de la ficha de **{nom}**")
+                            # Feedback según si fue buen o mal negocio
+                            if valor_mercado_real > COSTO_OPERATIVO:
+                                st.balloons()
+                                st.success(f"¡NEGOCIO EXCELENTE! {nom} vale € {formatear_total(valor_mercado_real)}")
+                            else:
+                                st.warning(f"Fichaje realizado: {nom} vale € {formatear_total(valor_mercado_real)}. (Pérdida de valor)")
                     
                     st.session_state.confirmar_scouting = False
                     st.rerun()
                 else:
-                    st.error("Presupuesto insuficiente.")
+                    st.error("Fondos insuficientes para esta operación.")
                     st.session_state.confirmar_scouting = False
 
-            if c_no.button("❌ NO", use_container_width=True):
+            if c_no.button("❌ CANCELAR", use_container_width=True):
                 st.session_state.confirmar_scouting = False
                 st.rerun()
 # --- 7. MIS REPRESENTADOS ---
