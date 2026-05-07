@@ -259,27 +259,60 @@ else:
             if c_no.button("❌ CANCELAR", use_container_width=True):
                 st.session_state.confirmar_scouting = False
                 st.rerun()
-# --- 7. MIS REPRESENTADOS ---
-st.markdown("### Mis Jugadores")
-cartera = ejecutar_db("SELECT id, nombre_jugador, porcentaje, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
-for j_id, j_nom, j_pct, j_costo, j_club in cartera:
-    info = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
-    score = info['ScoreOficial'].values[0] if not info.empty else 0
+# --- 7. MIS REPRESENTADOS (ORGANIZADOS POR POSICIÓN) ---
+st.markdown("### 📋 Cartera de Representados")
+
+# Obtenemos los jugadores del usuario
+cartera = ejecutar_db("SELECT id, nombre_jugador, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
+
+if not cartera:
+    st.info("Aún no tienes jugadores representados. Ve al Centro de Scouting.")
+else:
+    # Definimos el orden y mapeo de las posiciones
+    posiciones_orden = ["ARQ", "DEF", "VOL", "DEL"]
+    titulos_pos = {"ARQ": "🧤 Arqueros", "DEF": "🛡️ Defensores", "VOL": "⚙️ Volantes", "DEL": "🏹 Delanteros"}
     
-    with st.container(border=True):
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            st.markdown(f'#### <span style="color: #00D4FF; text-shadow: 0px 0px 10px rgba(0,212,255,0.5);">{j_nom}</span> <small style="color: #f0f2f6;">({j_club})</small>', unsafe_allow_html=True)
-            st.markdown(f"**Ficha:** {int(j_pct)}%")
-            st.write(f"Inversión: € {formatear_total(j_costo)} | Score: {score}")
-        with c2:
-            confirmar_v = st.checkbox("Confirmar Venta", key=f"chk_{j_id}")
-            valor_salida = j_costo * 0.99
-            if st.button(f"VENDER €{formatear_total(valor_salida)}", key=f"btn_{j_id}", disabled=not confirmar_v):
-                ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_salida, u_id), commit=True)
-                ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", (u_id, f"Venta {j_nom}", valor_salida, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
-                st.rerun()
+    # Creamos un diccionario para organizar a los jugadores por su posición real del Excel
+    cartera_organizada = {pos: [] for pos in posiciones_orden}
+    
+    for j_id, j_nom, j_valor, j_club in cartera:
+        # Buscamos la posición en el dataframe oficial (df_oficial)
+        info_excel = df_oficial[df_oficial.iloc[:, 0].str.strip() == j_nom.strip()]
+        pos_jugador = info_excel.iloc[0, 1].strip().upper() if not info_excel.empty else "VOL" # Default por si falla
+        
+        if pos_jugador in cartera_organizada:
+            cartera_organizada[pos_jugador].append({
+                "id": j_id, "nombre": j_nom, "valor": j_valor, "club": j_club
+            })
+
+    # Dibujamos las columnas por posición
+    cols_pos = st.columns(4)
+    
+    for i, pos_key in enumerate(posiciones_orden):
+        with cols_pos[i]:
+            st.markdown(f"#### {titulos_pos[pos_key]}")
+            jugadores_en_pos = cartera_organizada[pos_key]
+            
+            if not jugadores_en_pos:
+                st.caption("Sin representantes")
+            
+            for jug in jugadores_en_pos:
+                with st.container(border=True):
+                    st.markdown(f"**{jug['nombre']}**")
+                    st.caption(f"{jug['club']}")
+                    
+                    # Cambio: "Inversión" por "Valor" y quitamos el %
+                    st.write(f"Valor: € {formatear_total(jug['valor'])}")
+                    
+                    # Botón de Venta integrado
+                    conf_v = st.checkbox("Confirmar", key=f"v_chk_{jug['id']}")
+                    valor_salida = jug['valor'] * 0.99
+                    if st.button(f"VENDER", key=f"v_btn_{jug['id']}", disabled=not conf_v, use_container_width=True):
+                        ejecutar_db("DELETE FROM cartera WHERE id = ?", (jug['id'],), commit=True)
+                        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_salida, u_id), commit=True)
+                        ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                                    (u_id, f"Venta {jug['nombre']}", valor_salida, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                        st.rerun()
 
 # --- 8. RANKING E HISTORIAL ---
 st.divider()
