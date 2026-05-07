@@ -99,26 +99,28 @@ if st.button(f"🔭 LANZAR BÚSQUEDA (2.5M)"):
         st.error("No tienes dinero.")
 
 # --- 7. MIS REPRESENTADOS (ORGANIZADOS POR TUS COLUMNAS) ---
+# --- 7. MIS REPRESENTADOS (DISEÑO MEJORADO) ---
 st.divider()
-st.markdown("### 📋 Mis Jugadores")
+st.markdown("### 📋 Mi Cartera de Jugadores")
 cartera_db = ejecutar_db("SELECT id, nombre_jugador, costo_compra, club FROM cartera WHERE usuario_id = ?", (u_id,))
 
 if not cartera_db:
-    st.info("Tu cartera está vacía.")
+    st.info("Tu cartera está vacía. Ve al Centro de Scouting.")
 else:
-    # Clasificación exacta por columna C (Posición)
+    # Clasificación por columna C (Posición)
     cat = {"ARQ": [], "DEF": [], "VOL": [], "DEL": [], "OTRO": []}
     
     for j_id, j_nom, j_valor, j_club in cartera_db:
-        # Buscamos en el excel
+        # Buscamos en el excel para obtener la posición exacta (Columna C = índice 2)
         m = df_oficial[df_oficial.iloc[:, 0].str.strip().str.upper() == j_nom.strip().upper()]
         if not m.empty:
-            p_excel = str(m.iloc[0, 2]).strip().upper() # Columna C es índice 2
+            p_excel = str(m.iloc[0, 2]).strip().upper()
             if p_excel in cat: cat[p_excel].append((j_id, j_nom, j_valor, j_club))
             else: cat["OTRO"].append((j_id, j_nom, j_valor, j_club))
         else:
             cat["OTRO"].append((j_id, j_nom, j_valor, j_club))
 
+    # Definición de columnas y títulos
     cols = st.columns(5)
     titulos = ["ARQ", "DEF", "VOL", "DEL", "OTRO"]
     iconos = ["🧤 ARQ", "🛡️ DEF", "⚙️ VOL", "🏹 DEL", "❓ OTRO"]
@@ -128,10 +130,26 @@ else:
             st.markdown(f"**{iconos[i]}**")
             for j_id, j_nom, j_valor, j_club in cat[t]:
                 with st.container(border=True):
-                    st.markdown(f"**{j_nom}**")
-                    st.write(f"Valor: €{formatear_total(j_valor)}")
-                    if st.checkbox("Vender", key=f"c_{j_id}"):
-                        if st.button("CONFIRMAR", key=f"b_{j_id}"):
-                            ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
-                            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (j_valor * 0.99, u_id), commit=True)
-                            st.rerun()
+                    # 1. Nombre más grande (HTML)
+                    st.markdown(f"""
+                        <div style="line-height: 1.2;">
+                            <span style="font-size: 20px; font-weight: bold; color: #00D4FF;">{j_nom}</span><br>
+                            <span style="font-size: 14px; color: #CCCCCC;">{j_club}</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # 2. Valor en formato M o K
+                    valor_formateado = formatear_abreviado(j_valor)
+                    st.write(f"Valor: **€ {valor_formateado}**")
+                    
+                    # 3. Botón de vender tal cual el actual
+                    conf_v = st.checkbox("Confirmar", key=f"c_{j_id}")
+                    # El valor de salida es el 99% (comisión del 1%)
+                    valor_salida = j_valor * 0.99
+                    
+                    if st.button(f"VENDER €{formatear_abreviado(valor_salida)}", key=f"b_{j_id}", disabled=not conf_v, use_container_width=True):
+                        ejecutar_db("DELETE FROM cartera WHERE id = ?", (j_id,), commit=True)
+                        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (valor_salida, u_id), commit=True)
+                        ejecutar_db("INSERT INTO historial (usuario_id, detalle, monto, fecha) VALUES (?,?,?,?)", 
+                                    (u_id, f"Venta {j_nom}", valor_salida, datetime.now().strftime("%Y-%m-%d %H:%M")), commit=True)
+                        st.rerun()
