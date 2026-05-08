@@ -6,9 +6,10 @@ from datetime import datetime
 
 # --- 1. CONFIGURACIÓN INICIAL Y DB ---
 DB_NAME = 'agencia_global_v41.db'
-SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
+# NUEVO SHEET PROPORCIONADO
+SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ2VmykJ-6g-KVHVS3doLPVdxGA09KgOByjy67lnJW-VlJxLWgukpKAUM1PmeTOKbPtH1fNDSUyCBTO/pub?output=csv"
 
-st.set_page_config(page_title="Pro Fútbol Manager 2026", layout="wide")
+st.set_page_config(page_title="AFA Manager Pro 2026", layout="wide")
 
 def ejecutar_db(query, params=(), commit=False):
     with sqlite3.connect(DB_NAME, check_same_thread=False) as conn:
@@ -23,18 +24,15 @@ ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios
 
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre_jugador TEXT, 
-              porcentaje REAL, costo_compra REAL, club TEXT)''', commit=True)
+              porcentaje REAL, costo_compra REAL, club TEXT, titular INTEGER DEFAULT 0)''', commit=True)
 
-ejecutar_db('''CREATE TABLE IF NOT EXISTS historial 
-             (id INTEGER PRIMARY KEY, usuario_id INTEGER, detalle TEXT, monto REAL, fecha TEXT)''', commit=True)
-
-# --- PARCHE DE SEGURIDAD (Evita el OperationalError) ---
+# Parche de seguridad por si la tabla ya existía sin la columna titular
 try:
     ejecutar_db("ALTER TABLE cartera ADD COLUMN titular INTEGER DEFAULT 0", commit=True)
-except Exception:
-    pass # Si la columna ya existe, no hace nada
+except:
+    pass
 
-# --- 2. ESTILO VISUAL "AZUL CHAMPIONS" ---
+# --- 2. ESTILO VISUAL ---
 st.markdown("""
     <style>
     .stApp { background: linear-gradient(180deg, #001633 0%, #000814 100%); }
@@ -44,33 +42,32 @@ st.markdown("""
         background-color: rgba(255, 255, 255, 0.05);
         border: 1px solid #003366 !important;
         border-radius: 10px;
-        padding: 10px;
+        padding: 15px;
     }
-    .stButton>button { background-color: #004494; color: white; width: 100%; border-radius: 8px; border: none; font-weight: bold; }
-    .stButton>button:hover { background-color: #005bc4; border: none; }
+    .stButton>button { background-color: #004494; color: white; border-radius: 8px; font-weight: bold; width: 100%; border: none; }
+    .stButton>button:hover { background-color: #005bc4; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. FUNCIONES DE CARGA Y FORMATO ---
+# --- 3. FUNCIONES DE CARGA Y ESTRELLAS ---
 @st.cache_data(ttl=60)
 def cargar_datos_excel():
     try:
         df = pd.read_csv(SHEET_URL)
         df.columns = [c.strip() for c in df.columns]
-        # Columna D (índice 3) = Valor, Columna E (índice 4) = Puntaje
-        def limpiar_v(v):
-            try: return int(''.join(filter(str.isdigit, str(v).replace('.',''))))
-            except: return 1000000
-        df['ValorNum'] = df.iloc[:, 3].apply(limpiar_v)
+        # En este sheet: Nivel es la columna 2, Score es la columna 4
+        df['NivelNum'] = pd.to_numeric(df.iloc[:, 2], errors='coerce').fillna(1)
         df['ScoreNum'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
         return df
-    except: return pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
-def convertir_a_estrellas(score):
-    if score >= 8.5: return "⭐⭐⭐⭐⭐"
-    if score >= 7.5: return "⭐⭐⭐⭐"
-    if score >= 6.5: return "⭐⭐⭐"
-    if score >= 5.5: return "⭐⭐"
+def formato_estrellas(nivel):
+    n = int(nivel)
+    if n >= 5: return "⭐⭐⭐⭐⭐"
+    if n == 4: return "⭐⭐⭐⭐"
+    if n == 3: return "⭐⭐⭐"
+    if n == 2: return "⭐⭐"
     return "⭐"
 
 def formatear_abreviado(monto):
@@ -79,10 +76,10 @@ def formatear_abreviado(monto):
     if m >= 1_000: return f"{m / 1_000:.0f}K"
     return str(int(m))
 
-# --- 4. ACCESO (LOGIN) ---
+# --- 4. LOGIN ---
 if 'manager_id' not in st.session_state:
     with st.sidebar:
-        st.title("🛡️ ACCESO AGENTE")
+        st.title("🛡️ ACCESO")
         u = st.text_input("Usuario")
         p = st.text_input("Contraseña", type="password")
         if st.button("INGRESAR / REGISTRAR"):
@@ -91,25 +88,21 @@ if 'manager_id' not in st.session_state:
                 if res[0][1] == p:
                     st.session_state.manager_id = res[0][0]
                     st.rerun()
-                else: st.error("Contraseña incorrecta")
+                else: st.error("Clave incorrecta")
             else:
-                # Inicio con 30.000.000
                 ejecutar_db("INSERT INTO usuarios (nombre, password, presupuesto, prestigio) VALUES (?, ?, 30000000, 10)", (u, p), commit=True)
-                st.success("Cuenta creada. ¡Bienvenido!")
+                st.success("Cuenta creada")
                 st.rerun()
     st.stop()
 
-# Cargar contexto del usuario
 u_id = st.session_state.manager_id
-user_data = ejecutar_db("SELECT nombre, presupuesto, prestigio FROM usuarios WHERE id = ?", (u_id,))[0]
-nombre_m, presupuesto, prestigio = user_data
+user_info = ejecutar_db("SELECT nombre, presupuesto, prestigio FROM usuarios WHERE id = ?", (u_id,))[0]
 df_base = cargar_datos_excel()
 
-# --- 5. SIDEBAR (MÉTRICAS Y SCOUTING) ---
+# --- 5. SIDEBAR ---
 with st.sidebar:
-    st.subheader(f"👤 {nombre_m}")
-    st.metric("Caja Global", f"€ {formatear_abreviado(presupuesto)}")
-    st.metric("Reputación", f"{prestigio} pts")
+    st.subheader(f"👤 {user_info[0]}")
+    st.metric("Presupuesto", f"€ {formatear_abreviado(user_info[1])}")
     
     if st.button("Cerrar Sesión"):
         del st.session_state.manager_id
@@ -117,83 +110,71 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🛒 Mercado")
-    if st.button("🔭 SCOUTING PREMIUM (2.5M)"):
-        if presupuesto >= 2500000:
+    if st.button("🔭 COMPRAR PACK SCOUTING (100c)"):
+        # Adaptado a 100 créditos como tu ejemplo original si prefieres, 
+        # o puedes cambiarlo a 2.5M. Usaremos 2.500.000 para consistencia con tu v41.
+        costo = 2500000 
+        if user_info[1] >= costo:
             jugador = df_base.sample(n=1).iloc[0]
-            nom = jugador.iloc[0].strip()
-            equipo = jugador.iloc[1].strip()
-            val = int(jugador['ValorNum'])
-            
-            check = ejecutar_db("SELECT id FROM cartera WHERE usuario_id=? AND nombre_jugador=?", (u_id, nom))
-            if not check:
-                ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club, titular) VALUES (?,?,?,?,?,0)",
-                            (u_id, nom, 100, val, equipo), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - 2500000 WHERE id = ?", (u_id,), commit=True)
-                st.success(f"Fichado: {nom}")
-                st.rerun()
-            else:
-                st.error(f"{nom} ya está en tu agencia. Dinero perdido.")
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - 2500000 WHERE id = ?", (u_id,), commit=True)
-                st.rerun()
+            nom = jugador.iloc[0] # Columna Jugador
+            ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, costo_compra, club) VALUES (?, ?, ?, ?)",
+                        (u_id, nom, 1000000, jugador.iloc[3]), commit=True)
+            ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo, u_id), commit=True)
+            st.success(f"¡Salió {nom}!")
+            st.rerun()
         else:
-            st.error("Fondos insuficientes")
+            st.error("Dinero insuficiente")
 
-# --- 6. CUERPO PRINCIPAL (ONCE Y BANCO) ---
-st.title("⚽ Pro Fútbol Manager 2026")
+# --- 6. INTERFAZ PRINCIPAL ---
+st.title("⚽ AFA Manager Pro 2026")
 
-cartera = ejecutar_db("SELECT id, nombre_jugador, costo_compra, club, titular FROM cartera WHERE usuario_id = ?", (u_id,))
-df_cartera = pd.DataFrame(cartera, columns=['id', 'Jugador', 'Valor', 'Equipo', 'titular'])
+cartera = ejecutar_db("SELECT id, nombre_jugador, club, titular FROM cartera WHERE usuario_id = ?", (u_id,))
+df_cartera = pd.DataFrame(cartera, columns=['id', 'Jugador', 'Equipo', 'titular'])
 
 if not df_cartera.empty:
-    # Unir con datos del Excel (Posición está en columna C - índice 2)
-    df_cartera = df_cartera.merge(df_base.iloc[:, [0, 2, 4, 5]], left_on='Jugador', right_on=df_base.columns[0], how='left')
-    df_cartera['Estrellas'] = df_cartera['ScoreNum'].apply(convertir_a_estrellas)
-    df_cartera['POS'] = df_cartera.iloc[:, 5] # Tomamos la columna C del merge
+    # Unir con datos del Sheet (Jugador, POS, Nivel, Score)
+    df_cartera = df_cartera.merge(df_base[['Jugador', 'POS', 'NivelNum', 'ScoreNum']], on='Jugador', how='left')
+    df_cartera['Estrellas'] = df_cartera['NivelNum'].apply(formato_estrellas)
 
-    # SECCIÓN ONCE TITULAR
+    # TITULARES
     st.subheader("🔝 Once Titular")
-    titulares = df_cartera[df_cartera['titular'] == 1]
-    if not titulares.empty:
-        titulares['orden'] = titulares['POS'].map({'ARQ':0, 'DEF':1, 'VOL':2, 'DEL':3}).fillna(9)
-        st.dataframe(titulares.sort_values('orden')[['POS', 'Jugador', 'Equipo', 'Estrellas']], use_container_width=True, hide_index=True)
-        
-        bajar = st.selectbox("Mandar al banco:", titulares['Jugador'], key="sel_bajar")
-        if st.button("Bajar al banco ⬇️"):
+    tits = df_cartera[df_cartera['titular'] == 1]
+    if not tits.empty:
+        st.dataframe(tits[['POS', 'Jugador', 'Equipo', 'Estrellas', 'ScoreNum']], use_container_width=True, hide_index=True)
+        bajar = st.selectbox("Quitar del once:", tits['Jugador'])
+        if st.button("Mandar al banco ⬇️"):
             ejecutar_db("UPDATE cartera SET titular = 0 WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, bajar), commit=True)
             st.rerun()
     else:
-        st.info("Selecciona jugadores del banco para armar tu Once.")
+        st.info("No hay titulares.")
 
     st.divider()
 
-    # SECCIÓN BANCO (ORGANIZADO POR POSICIÓN)
-    st.subheader("⏬ Banco de Representados")
+    # BANCO (POR COLUMNAS)
+    st.subheader("⏬ Banco de Suplentes")
     banco = df_cartera[df_cartera['titular'] == 0]
-    if not banco.empty:
-        # Mostramos el banco en columnas
-        pos_list = ["ARQ", "DEF", "VOL", "DEL", "OTRO"]
-        cols = st.columns(5)
-        for i, pkey in enumerate(pos_list):
-            with cols[i]:
-                st.markdown(f"**{pkey}**")
-                jugs_pos = banco[banco['POS'].str.upper() == pkey] if pkey != "OTRO" else banco[~banco['POS'].isin(["ARQ", "DEF", "VOL", "DEL"])]
-                for _, jug in jugs_pos.iterrows():
-                    with st.container(border=True):
-                        st.markdown(f"<span style='font-size:18px; color:#00D4FF; font-weight:bold;'>{jug['Jugador']}</span>", unsafe_allow_html=True)
-                        st.caption(f"{jug['Equipo']} | {jug['Estrellas']}")
-                        st.write(f"Valor: €{formatear_abreviado(jug['Valor'])}")
-                        
-                        if st.button("TITULAR ⬆️", key=f"sub_{jug['id']}"):
-                            ejecutar_db("UPDATE cartera SET titular = 1 WHERE id = ?", (jug['id'],), commit=True)
-                            st.rerun()
-                        
-                        if st.checkbox("Vender", key=f"vchk_{jug['id']}"):
-                            if st.button("VENDER 💰", key=f"vbtn_{jug['id']}"):
-                                pago = jug['Valor'] * 0.99
-                                ejecutar_db("DELETE FROM cartera WHERE id = ?", (jug['id'],), commit=True)
-                                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (pago, u_id), commit=True)
-                                st.rerun()
-    else:
-        st.write("Banco vacío.")
+    
+    posiciones = ["ARQ", "DEF", "VOL", "DEL"]
+    cols = st.columns(4)
+    
+    for i, p in enumerate(posiciones):
+        with cols[i]:
+            st.markdown(f"#### {p}")
+            jugs = banco[banco['POS'] == p]
+            for _, j in jugs.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#00D4FF;'>{j['Jugador']}</span>", unsafe_allow_html=True)
+                    st.write(f"{j['Equipo']}")
+                    st.write(j['Estrellas'])
+                    
+                    if st.button("TITULAR ⬆️", key=f"t_{j['id']}"):
+                        ejecutar_db("UPDATE cartera SET titular = 1 WHERE id = ?", (j['id'],), commit=True)
+                        st.rerun()
+                    
+                    if st.button("VENDER 💰", key=f"v_{j['id']}"):
+                        pago = 500000 # Valor fijo o basado en nivel
+                        ejecutar_db("DELETE FROM cartera WHERE id = ?", (j['id'],), commit=True)
+                        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (pago, u_id), commit=True)
+                        st.rerun()
 else:
-    st.warning("No tienes jugadores en tu agencia.")
+    st.warning("Compra jugadores en el mercado lateral.")
