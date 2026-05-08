@@ -1,205 +1,211 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import random
-from datetime import datetime
+import os
+import json
 
-# --- 1. CONFIGURACIÓN INICIAL Y DB ---
-DB_NAME = 'agencia_global_v41.db'
-# Convertimos el link HTML a CSV para que Pandas lo entienda
-SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQed5yx4ReWBiR2IFct9y1jkLGVF9SIbn3RbzNYYZLJPhhcq_yy0WuTZWd0vVJAZ2kvD_walSrs-J-S/pub?output=csv"
+# --- 1. CONFIGURACIÓN INICIAL ---
+st.set_page_config(page_title="AFA Manager 2026", layout="wide")
 
-st.set_page_config(page_title="AFA Manager Pro 2026", layout="wide")
+# Persistencia de usuarios en archivo local
+DB_FILE = "usuarios_db.json"
 
-def ejecutar_db(query, params=(), commit=False):
-    with sqlite3.connect(DB_NAME, check_same_thread=False) as conn:
-        c = conn.cursor()
-        c.execute(query, params)
-        if commit: conn.commit()
-        return c.fetchall()
+def cargar_usuarios():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {"admin": "1234"}
+    return {"admin": "1234"}
 
-# --- INICIALIZACIÓN DE TABLAS ---
-ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
-             (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, password TEXT, presupuesto REAL, prestigio INTEGER)''', commit=True)
+def guardar_usuario(user, password):
+    usuarios = cargar_usuarios()
+    usuarios[user] = password
+    with open(DB_FILE, "w") as f:
+        json.dump(usuarios, f)
 
-ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
-             (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre_jugador TEXT, 
-              porcentaje REAL, costo_compra REAL, club TEXT, titular INTEGER DEFAULT 0)''', commit=True)
+# --- 2. LOGIN Y REGISTRO AUTOMÁTICO ---
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+if 'ultimo_giro' not in st.session_state:
+    st.session_state.ultimo_giro = None
 
-# Parche por si la columna titular no existe en tu .db actual
-try:
-    ejecutar_db("ALTER TABLE cartera ADD COLUMN titular INTEGER DEFAULT 0", commit=True)
-except:
-    pass
-
-# --- 2. ESTILO VISUAL AZUL PROFUNDO ---
-st.markdown("""
-    <style>
-    .stApp { background: linear-gradient(180deg, #001633 0%, #000814 100%); }
-    h1, h2, h3, h4, h5, p, span, label { color: #f0f2f6 !important; }
-    [data-testid="stMetricValue"] { color: #00D4FF !important; }
-    div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        background-color: rgba(255, 255, 255, 0.05);
-        border: 1px solid #003366 !important;
-        border-radius: 12px;
-        padding: 15px;
-    }
-    .stButton>button { background-color: #004494; color: white; border-radius: 8px; font-weight: bold; width: 100%; border: none; height: 3em; }
-    .stButton>button:hover { background-color: #005bc4; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 3. PROCESAMIENTO DE DATOS ---
-@st.cache_data(ttl=60)
-def cargar_datos():
-    try:
-        df = pd.read_csv(SHEET_URL)
-        df.columns = [c.strip() for c in df.columns]
-        # Limpieza de Cotización (Columna D - Índice 3)
-        def limpiar_v(v):
-            try: return int(''.join(filter(str.isdigit, str(v).replace('.',''))))
-            except: return 1000000
-        df['ValorNum'] = df.iloc[:, 3].apply(limpiar_v)
-        # Puntaje (Columna E - Índice 4)
-        df['ScoreNum'] = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
-        return df
-    except Exception as e:
-        st.error(f"Error al conectar con Google Sheets: {e}")
-        return pd.DataFrame()
-
-def obtener_estrellas(score):
-    try:
-        s = float(score)
-        if s >= 9: return "⭐⭐⭐⭐⭐"
-        if s >= 7.5: return "⭐⭐⭐⭐"
-        if s >= 6: return "⭐⭐⭐"
-        if s >= 4.5: return "⭐⭐"
-        return "⭐"
-    except: return "⭐"
-
-def formato_dinero(monto):
-    m = float(monto)
-    if m >= 1_000_000: return f"{m / 1_000_000:.1f}M".replace('.0M', 'M').replace('.', ',')
-    if m >= 1_000: return f"{m / 1_000:.0f}K"
-    return str(int(m))
-
-# --- 4. SISTEMA DE LOGIN ---
-if 'manager_id' not in st.session_state:
+if not st.session_state.autenticado:
     with st.sidebar:
-        st.title("🛡️ AGENCIA ACCESO")
-        u = st.text_input("Agente").strip()
-        p = st.text_input("Password", type="password").strip()
-        if st.button("INGRESAR"):
+        st.title("🛡️ ACCESO / REGISTRO")
+        st.info("Si no tienes cuenta, ingresa un usuario y clave para registrarte.")
+        u = st.text_input("Usuario")
+        p = st.text_input("Contraseña", type="password")
+        
+        if st.button("Ingresar / Crear Cuenta"):
             if u and p:
-                res = ejecutar_db("SELECT id, password FROM usuarios WHERE nombre = ?", (u,))
-                if res:
-                    if res[0][1] == p:
-                        st.session_state.manager_id = res[0][0]
+                usuarios = cargar_usuarios()
+                if u in usuarios:
+                    if usuarios[u] == p:
+                        st.session_state.autenticado = True
+                        st.session_state.usuario = u
                         st.rerun()
-                    else: st.error("Password incorrecto")
+                    else:
+                        st.error("Contraseña incorrecta.")
                 else:
-                    ejecutar_db("INSERT INTO usuarios (nombre, password, presupuesto, prestigio) VALUES (?, ?, 30000000, 10)", (u, p), commit=True)
-                    st.success("Cuenta de Agente creada")
+                    guardar_usuario(u, p)
+                    st.session_state.autenticado = True
+                    st.session_state.usuario = u
+                    st.success(f"¡Usuario {u} registrado!")
                     st.rerun()
+            else:
+                st.warning("Completa ambos campos.")
     st.stop()
 
-# Cargar Info Manager
-u_id = st.session_state.manager_id
-u_nombre, u_presu, u_pres = ejecutar_db("SELECT nombre, presupuesto, prestigio FROM usuarios WHERE id = ?", (u_id,))[0]
-df_base = cargar_datos()
+# --- 3. CARGA DE DATOS ---
+@st.cache_data
+def load_data():
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ2VmykJ-6g-KVHVS3doLPVdxGA09KgOByjy67lnJW-VlJxLWgukpKAUM1PmeTOKbPtH1fNDSUyCBTO/pub?output=csv"
+    try:
+        df = pd.read_csv(url)
+        df.columns = [c.strip() for c in df.columns]
+        return df
+    except:
+        return pd.DataFrame(columns=["Jugador", "POS", "Nivel", "Equipo", "Score"])
 
-# --- 5. PANEL LATERAL ---
+df_base = load_data()
+
+# --- 4. ESTADO DEL JUEGO ---
+if 'creditos' not in st.session_state: st.session_state.creditos = 1000
+if 'titulares' not in st.session_state: st.session_state.titulares = []
+if 'suplentes' not in st.session_state: st.session_state.suplentes = []
+if 'historial' not in st.session_state: st.session_state.historial = []
+
+# --- 5. LÓGICA Y TU ARREGLO DE ESTRELLAS ---
+def formato_nivel(n):
+    try: 
+        n = int(n)
+    except: 
+        return f"{n}★"
+    
+    # Tu arreglo con los colores solicitados
+    if n == 5: return "★★★★★"
+    if n == 4: return "★★★★"
+    if n == 3: return "★★★"
+    if n == 2: return "★★"
+    if n == 1: return "★"
+    return f"{n}★"
+
+def ordenar_titulares():
+    # Orden táctico: Arquero -> Defensor -> Volante -> Delantero
+    orden = {'ARQ': 0, 'DEF': 1, 'VOL': 2, 'DEL': 3}
+    st.session_state.titulares.sort(key=lambda x: orden.get(x['POS'], 99))
+
+# --- 6. PANEL LATERAL (SIDEBAR) ---
 with st.sidebar:
-    st.subheader(f"💼 Agente: {u_nombre}")
-    st.metric("Caja Global", f"€ {formato_dinero(u_presu)}")
-    st.metric("Reputación", f"{u_pres} pts")
+    st.write(f"🎮 **Manager:** {st.session_state.usuario}")
+    st.metric("Presupuesto", f"{st.session_state.creditos} c")
     
     if st.button("Cerrar Sesión"):
-        del st.session_state.manager_id
+        st.session_state.autenticado = False
         st.rerun()
 
     st.divider()
-    st.subheader("🔭 Scouting Premium")
-    costo_scout = 2500000
-    if st.button(f"BUSCAR JUGADOR ({formato_dinero(costo_scout)})"):
-        if u_presu >= costo_scout:
-            j_azar = df_base.sample(n=1).iloc[0]
-            nom = j_azar.iloc[0]
-            club = j_azar.iloc[1]
-            valor = j_azar['ValorNum']
-            
-            # Check duplicados
-            if not ejecutar_db("SELECT id FROM cartera WHERE usuario_id=? AND nombre_jugador=?", (u_id, nom)):
-                ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, costo_compra, club) VALUES (?, ?, ?, ?)",
-                            (u_id, nom, valor, club), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_scout, u_id), commit=True)
-                st.success(f"¡Fichado: {nom}!")
-                st.rerun()
-            else:
-                st.warning(f"{nom} ya está en tu agencia. Dinero perdido.")
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - ? WHERE id = ?", (costo_scout, u_id), commit=True)
-                st.rerun()
-        else:
-            st.error("Fondos insuficientes")
+    
+    # RULETA (Ahora visible)
+    st.subheader("🎡 Ruleta de Créditos")
+    if st.session_state.ultimo_giro is not None:
+        res = st.session_state.ultimo_giro
+        if res > 0: st.success(f"¡Último giro: +{res}c! 🤑")
+        elif res < 0: st.error(f"¡Último giro: {res}c! 💸")
+        else: st.info("¡Último giro: 0c! 😐")
 
-# --- 6. GESTIÓN DE PLANTILLA ---
-st.title("⚽ AFA Manager Pro 2026")
-
-raw_cartera = ejecutar_db("SELECT id, nombre_jugador, club, titular FROM cartera WHERE usuario_id = ?", (u_id,))
-df_cartera = pd.DataFrame(raw_cartera, columns=['id', 'Jugador', 'Club_DB', 'titular'])
-
-if not df_cartera.empty:
-    # Unir con datos del Sheet para POS y Score
-    df_cartera = df_cartera.merge(df_base.iloc[:, [0, 2, 4]], left_on='Jugador', right_on=df_base.columns[0], how='left')
-    df_cartera['Estrellas'] = df_cartera.iloc[:, 5].apply(obtener_estrellas) # Columna Score
-    df_cartera['POS'] = df_cartera.iloc[:, 4] # Columna POS
-
-    # --- SECCIÓN TITULARES ---
-    st.subheader("🔝 El Once de Gala")
-    tits = df_cartera[df_cartera['titular'] == 1]
-    if not tits.empty:
-        # Orden táctico
-        tits['orden'] = tits['POS'].map({'ARQ':0, 'DEF':1, 'VOL':2, 'DEL':3}).fillna(9)
-        st.dataframe(tits.sort_values('orden')[['POS', 'Jugador', 'Estrellas', 'Club_DB']], use_container_width=True, hide_index=True)
-        
-        b_col1, b_col2 = st.columns([1,3])
-        with b_col1:
-            bajar = st.selectbox("Mandar al banco:", tits['Jugador'])
-            if st.button("BAJAR ⬇️"):
-                ejecutar_db("UPDATE cartera SET titular = 0 WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, bajar), commit=True)
-                st.rerun()
-    else:
-        st.info("No hay jugadores en el Once Titular.")
+    if st.button("GIRAR RULETA 🎲"):
+        resultado = random.choices([0, 1, -1, 3], weights=[0.50, 0.25, 0.20, 0.05])[0]
+        st.session_state.creditos += resultado
+        st.session_state.ultimo_giro = resultado
+        st.session_state.historial.insert(0, f"Ruleta: {resultado}c")
+        st.rerun()
 
     st.divider()
+    
+    # MERCADO DE PACKS
+    if st.button("🛒 COMPRAR PACK (100c)"):
+        if st.session_state.creditos >= 100:
+            if len(st.session_state.suplentes) < 25:
+                st.session_state.creditos -= 100
+                st.session_state.ultimo_giro = None
+                nuevos = df_base.sample(n=2).to_dict('records')
+                st.session_state.suplentes.extend(nuevos)
+                st.session_state.historial.insert(0, f"Pack: {nuevos[0]['Jugador']} y {nuevos[1]['Jugador']}")
+                st.toast("¡Pack abierto!")
+                st.rerun()
+            else:
+                st.warning("Banco lleno (Máx 25)")
+        else:
+            st.error("Créditos insuficientes")
 
-    # --- SECCIÓN BANCO ---
-    st.subheader("⏬ Cartera de Representados")
-    banco = df_cartera[df_cartera['titular'] == 0]
+# --- 7. CUERPO PRINCIPAL ---
+st.title("⚽ AFA Manager Pro 2026")
+
+# Listado Titulares (Compacto)
+st.subheader("🔝 Once Titular (1-4-4-2)")
+if st.session_state.titulares:
+    ordenar_titulares()
+    df_t = pd.DataFrame(st.session_state.titulares)
+    df_t['Rareza'] = df_t['Nivel'].apply(formato_nivel)
+    st.dataframe(
+        df_t[['POS', 'Jugador', 'Equipo', 'Rareza', 'Score']], 
+        use_container_width=True, 
+        hide_index=True, 
+        height=422
+    )
     
-    pos_keys = ["ARQ", "DEF", "VOL", "DEL"]
-    cols = st.columns(4)
-    
-    for i, pk in enumerate(pos_keys):
-        with cols[i]:
-            st.markdown(f"#### {pk}")
-            j_pos = banco[banco['POS'] == pk]
-            for _, j in j_pos.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"<div style='font-size:20px; font-weight:bold; color:#00D4FF;'>{j['Jugador']}</div>", unsafe_allow_html=True)
-                    st.caption(f"{j['Club_DB']}")
-                    st.write(j['Estrellas'])
-                    
-                    if st.button("TITULAR ⬆️", key=f"up_{j['id']}"):
-                        ejecutar_db("UPDATE cartera SET titular = 1 WHERE id = ?", (j['id'],), commit=True)
-                        st.rerun()
-                    
-                    if st.button("VENDER 💰", key=f"sel_{j['id']}"):
-                        # Venta al 90% del valor inicial
-                        pago = 1500000 # Valor base de venta
-                        ejecutar_db("DELETE FROM cartera WHERE id = ?", (j['id'],), commit=True)
-                        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (pago, u_id), commit=True)
-                        st.rerun()
+    quitar = st.selectbox("Mandar al banco:", [j['Jugador'] for j in st.session_state.titulares], key="q_tit")
+    if st.button("Bajar al banco ⬇️"):
+        idx = next(i for i, j in enumerate(st.session_state.titulares) if j['Jugador'] == quitar)
+        st.session_state.suplentes.append(st.session_state.titulares.pop(idx))
+        st.rerun()
 else:
-    st.info("Tu agencia no tiene jugadores aún. ¡Empieza el Scouting!")
-    
+    st.info("Armá tu equipo seleccionando jugadores del banco.")
+
+st.divider()
+
+# Listado Suplentes (Compacto)
+st.subheader("⏬ Banco de Suplentes")
+if st.session_state.suplentes:
+    df_s = pd.DataFrame(st.session_state.suplentes)
+    df_s['Rareza'] = df_s['Nivel'].apply(formato_nivel)
+    st.dataframe(
+        df_s[['Jugador', 'POS', 'Rareza', 'Equipo']], 
+        use_container_width=True, 
+        hide_index=True, 
+        height=300
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.write("**Táctica**")
+        subir = st.selectbox("Subir al Once:", [j['Jugador'] for j in st.session_state.suplentes], key="s_sup")
+        if st.button("Poner de Titular ⬆️"):
+            idx = next(i for i, j in enumerate(st.session_state.suplentes) if j['Jugador'] == subir)
+            j = st.session_state.suplentes[idx]
+            conteo = [p['POS'] for p in st.session_state.titulares].count(j['POS'])
+            limites = {'ARQ': 1, 'DEF': 4, 'VOL': 4, 'DEL': 2}
+            
+            if conteo < limites.get(j['POS'], 0):
+                st.session_state.titulares.append(st.session_state.suplentes.pop(idx))
+                st.rerun()
+            else:
+                st.error(f"Límite de {j['POS']} alcanzado.")
+
+    with c2:
+        st.write("**Ventas**")
+        vender = st.selectbox("Vender Jugador:", [j['Jugador'] for j in st.session_state.suplentes], key="v_sup")
+        if st.button("VENDER JUGADOR 💰"):
+            idx = next(i for i, j in enumerate(st.session_state.suplentes) if j['Jugador'] == vender)
+            pago = int(st.session_state.suplentes[idx]['Nivel']) * 20
+            st.session_state.creditos += pago
+            st.session_state.historial.insert(0, f"Venta: {st.session_state.suplentes[idx]['Jugador']} (+{pago}c)")
+            st.session_state.suplentes.pop(idx)
+            st.rerun()
+
+with st.expander("📜 Ver Historial de Movimientos"):
+    for h in st.session_state.historial:
+        st.write(f"- {h}")
