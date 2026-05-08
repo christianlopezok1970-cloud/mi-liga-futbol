@@ -17,31 +17,47 @@ def ejecutar_db(query, params=(), commit=False):
         if commit: conn.commit()
         return c.fetchall()
 
-# Crear tablas si no existen (Basado en tu estructura v41)
+# --- INICIALIZACIÓN DE TABLAS ---
 ejecutar_db('''CREATE TABLE IF NOT EXISTS usuarios 
              (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, password TEXT, presupuesto REAL, prestigio INTEGER)''', commit=True)
+
 ejecutar_db('''CREATE TABLE IF NOT EXISTS cartera 
              (id INTEGER PRIMARY KEY, usuario_id INTEGER, nombre_jugador TEXT, 
-              porcentaje REAL, costo_compra REAL, club TEXT, titular INTEGER DEFAULT 0)''', commit=True)
+              porcentaje REAL, costo_compra REAL, club TEXT)''', commit=True)
 
-# --- 2. ESTILO VISUAL "CHAMPIONS" ---
+ejecutar_db('''CREATE TABLE IF NOT EXISTS historial 
+             (id INTEGER PRIMARY KEY, usuario_id INTEGER, detalle TEXT, monto REAL, fecha TEXT)''', commit=True)
+
+# --- PARCHE DE SEGURIDAD (Evita el OperationalError) ---
+try:
+    ejecutar_db("ALTER TABLE cartera ADD COLUMN titular INTEGER DEFAULT 0", commit=True)
+except Exception:
+    pass # Si la columna ya existe, no hace nada
+
+# --- 2. ESTILO VISUAL "AZUL CHAMPIONS" ---
 st.markdown("""
     <style>
     .stApp { background: linear-gradient(180deg, #001633 0%, #000814 100%); }
-    h1, h2, h3, h4, p, span, label { color: #f0f2f6 !important; }
+    h1, h2, h3, h4, h5, p, span, label { color: #f0f2f6 !important; }
     [data-testid="stMetricValue"] { color: #00D4FF !important; }
-    .stButton>button { background-color: #004494; color: white; width: 100%; border: none; border-radius: 8px; }
+    div[data-testid="stVerticalBlock"] > div[style*="border"] {
+        background-color: rgba(255, 255, 255, 0.05);
+        border: 1px solid #003366 !important;
+        border-radius: 10px;
+        padding: 10px;
+    }
+    .stButton>button { background-color: #004494; color: white; width: 100%; border-radius: 8px; border: none; font-weight: bold; }
     .stButton>button:hover { background-color: #005bc4; border: none; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. FUNCIONES DE APOYO ---
+# --- 3. FUNCIONES DE CARGA Y FORMATO ---
 @st.cache_data(ttl=60)
 def cargar_datos_excel():
     try:
         df = pd.read_csv(SHEET_URL)
         df.columns = [c.strip() for c in df.columns]
-        # Columna D (3) es Valor, Columna E (4) es Score
+        # Columna D (índice 3) = Valor, Columna E (índice 4) = Puntaje
         def limpiar_v(v):
             try: return int(''.join(filter(str.isdigit, str(v).replace('.',''))))
             except: return 1000000
@@ -57,38 +73,42 @@ def convertir_a_estrellas(score):
     if score >= 5.5: return "⭐⭐"
     return "⭐"
 
-def formatear_moneda(monto):
-    return f"€ {int(monto):,}".replace(",", ".")
+def formatear_abreviado(monto):
+    m = float(monto)
+    if m >= 1_000_000: return f"{m / 1_000_000:.1f}M".replace('.0M', 'M').replace('.', ',')
+    if m >= 1_000: return f"{m / 1_000:.0f}K"
+    return str(int(m))
 
-# --- 4. ACCESO DE USUARIO ---
+# --- 4. ACCESO (LOGIN) ---
 if 'manager_id' not in st.session_state:
     with st.sidebar:
-        st.title("🛡️ AGENCIA ACCESO")
+        st.title("🛡️ ACCESO AGENTE")
         u = st.text_input("Usuario")
         p = st.text_input("Contraseña", type="password")
-        if st.button("Ingresar / Registrar"):
+        if st.button("INGRESAR / REGISTRAR"):
             res = ejecutar_db("SELECT id, password FROM usuarios WHERE nombre = ?", (u,))
             if res:
                 if res[0][1] == p:
                     st.session_state.manager_id = res[0][0]
                     st.rerun()
-                else: st.error("Clave incorrecta")
+                else: st.error("Contraseña incorrecta")
             else:
+                # Inicio con 30.000.000
                 ejecutar_db("INSERT INTO usuarios (nombre, password, presupuesto, prestigio) VALUES (?, ?, 30000000, 10)", (u, p), commit=True)
-                st.success("Cuenta creada exitosamente")
+                st.success("Cuenta creada. ¡Bienvenido!")
                 st.rerun()
     st.stop()
 
-# Cargar datos del manager logueado
+# Cargar contexto del usuario
 u_id = st.session_state.manager_id
-datos_m = ejecutar_db("SELECT nombre, presupuesto, prestigio FROM usuarios WHERE id = ?", (u_id,))[0]
-nombre_m, presupuesto, prestigio = datos_m
+user_data = ejecutar_db("SELECT nombre, presupuesto, prestigio FROM usuarios WHERE id = ?", (u_id,))[0]
+nombre_m, presupuesto, prestigio = user_data
 df_base = cargar_datos_excel()
 
-# --- 5. LÓGICA DE JUEGO (SIDEBAR) ---
+# --- 5. SIDEBAR (MÉTRICAS Y SCOUTING) ---
 with st.sidebar:
-    st.subheader(f"🎮 {nombre_m}")
-    st.metric("Presupuesto", formatear_moneda(presupuesto))
+    st.subheader(f"👤 {nombre_m}")
+    st.metric("Caja Global", f"€ {formatear_abreviado(presupuesto)}")
     st.metric("Reputación", f"{prestigio} pts")
     
     if st.button("Cerrar Sesión"):
@@ -96,79 +116,84 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    # RULETA DE PRESTIGIO
-    if st.button("🎲 RULETA DE AGENTE"):
-        cambio = random.choice([-500000, 0, 500000, 1000000, 2500000])
-        ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (cambio, u_id), commit=True)
-        st.toast(f"Resultado Ruleta: {formatear_moneda(cambio)}")
-        st.rerun()
-
-    st.divider()
-    # SCOUTING (PACK)
-    st.subheader("🛒 Scouting (2.5M)")
-    if st.button("LANZAR SCOUTING 🔭"):
+    st.subheader("🛒 Mercado")
+    if st.button("🔭 SCOUTING PREMIUM (2.5M)"):
         if presupuesto >= 2500000:
             jugador = df_base.sample(n=1).iloc[0]
             nom = jugador.iloc[0].strip()
-            # Evitar duplicados
-            if not ejecutar_db("SELECT id FROM cartera WHERE usuario_id=? AND nombre_jugador=?", (u_id, nom)):
-                ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club) VALUES (?,?,?,?,?)",
-                            (u_id, nom, 100, jugador['ValorNum'], jugador.iloc[1]))
+            equipo = jugador.iloc[1].strip()
+            val = int(jugador['ValorNum'])
+            
+            check = ejecutar_db("SELECT id FROM cartera WHERE usuario_id=? AND nombre_jugador=?", (u_id, nom))
+            if not check:
+                ejecutar_db("INSERT INTO cartera (usuario_id, nombre_jugador, porcentaje, costo_compra, club, titular) VALUES (?,?,?,?,?,0)",
+                            (u_id, nom, 100, val, equipo), commit=True)
                 ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - 2500000 WHERE id = ?", (u_id,), commit=True)
-                st.success(f"¡Has fichado a {nom}!")
+                st.success(f"Fichado: {nom}")
                 st.rerun()
-            else: st.warning(f"Ya tienes a {nom}, inversión perdida.")
-        else: st.error("Dinero insuficiente")
+            else:
+                st.error(f"{nom} ya está en tu agencia. Dinero perdido.")
+                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto - 2500000 WHERE id = ?", (u_id,), commit=True)
+                st.rerun()
+        else:
+            st.error("Fondos insuficientes")
 
-# --- 6. GESTIÓN DEL ONCE Y BANCO ---
+# --- 6. CUERPO PRINCIPAL (ONCE Y BANCO) ---
 st.title("⚽ Pro Fútbol Manager 2026")
 
-# Obtener jugadores de la DB
 cartera = ejecutar_db("SELECT id, nombre_jugador, costo_compra, club, titular FROM cartera WHERE usuario_id = ?", (u_id,))
 df_cartera = pd.DataFrame(cartera, columns=['id', 'Jugador', 'Valor', 'Equipo', 'titular'])
 
-# Mezclar con datos del Excel para obtener POS y Score
 if not df_cartera.empty:
-    df_cartera = df_cartera.merge(df_base[['Jugador', 'POS', 'ScoreNum']], on='Jugador', how='left')
+    # Unir con datos del Excel (Posición está en columna C - índice 2)
+    df_cartera = df_cartera.merge(df_base.iloc[:, [0, 2, 4, 5]], left_on='Jugador', right_on=df_base.columns[0], how='left')
     df_cartera['Estrellas'] = df_cartera['ScoreNum'].apply(convertir_a_estrellas)
+    df_cartera['POS'] = df_cartera.iloc[:, 5] # Tomamos la columna C del merge
 
-    # SECCIÓN TITULARES
+    # SECCIÓN ONCE TITULAR
     st.subheader("🔝 Once Titular")
     titulares = df_cartera[df_cartera['titular'] == 1]
     if not titulares.empty:
-        # Ordenar por posición (Arquero arriba)
         titulares['orden'] = titulares['POS'].map({'ARQ':0, 'DEF':1, 'VOL':2, 'DEL':3}).fillna(9)
         st.dataframe(titulares.sort_values('orden')[['POS', 'Jugador', 'Equipo', 'Estrellas']], use_container_width=True, hide_index=True)
         
-        bajar = st.selectbox("Mandar al banco:", titulares['Jugador'])
+        bajar = st.selectbox("Mandar al banco:", titulares['Jugador'], key="sel_bajar")
         if st.button("Bajar al banco ⬇️"):
             ejecutar_db("UPDATE cartera SET titular = 0 WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, bajar), commit=True)
             st.rerun()
     else:
-        st.info("No tienes titulares seleccionados.")
+        st.info("Selecciona jugadores del banco para armar tu Once.")
 
     st.divider()
 
-    # SECCIÓN BANCO
+    # SECCIÓN BANCO (ORGANIZADO POR POSICIÓN)
     st.subheader("⏬ Banco de Representados")
     banco = df_cartera[df_cartera['titular'] == 0]
     if not banco.empty:
-        st.dataframe(banco[['Jugador', 'POS', 'Equipo', 'Estrellas']], use_container_width=True, hide_index=True)
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            subir = st.selectbox("Subir al Once:", banco['Jugador'])
-            if st.button("Poner de Titular ⬆️"):
-                # Lógica de límites (Opcional, aquí lo pongo directo)
-                ejecutar_db("UPDATE cartera SET titular = 1 WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, subir), commit=True)
-                st.rerun()
-        with c2:
-            vender = st.selectbox("Vender Jugador:", banco['Jugador'])
-            if st.button("VENDER 💰"):
-                # Vende por el valor real del Excel * 0.90 (Comisión)
-                val_venta = float(banco[banco['Jugador']==vender]['Valor'].values[0]) * 0.90
-                ejecutar_db("DELETE FROM cartera WHERE usuario_id = ? AND nombre_jugador = ?", (u_id, vender), commit=True)
-                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (val_venta, u_id), commit=True)
-                st.rerun()
+        # Mostramos el banco en columnas
+        pos_list = ["ARQ", "DEF", "VOL", "DEL", "OTRO"]
+        cols = st.columns(5)
+        for i, pkey in enumerate(pos_list):
+            with cols[i]:
+                st.markdown(f"**{pkey}**")
+                jugs_pos = banco[banco['POS'].str.upper() == pkey] if pkey != "OTRO" else banco[~banco['POS'].isin(["ARQ", "DEF", "VOL", "DEL"])]
+                for _, jug in jugs_pos.iterrows():
+                    with st.container(border=True):
+                        st.markdown(f"<span style='font-size:18px; color:#00D4FF; font-weight:bold;'>{jug['Jugador']}</span>", unsafe_allow_html=True)
+                        st.caption(f"{jug['Equipo']} | {jug['Estrellas']}")
+                        st.write(f"Valor: €{formatear_abreviado(jug['Valor'])}")
+                        
+                        if st.button("TITULAR ⬆️", key=f"sub_{jug['id']}"):
+                            ejecutar_db("UPDATE cartera SET titular = 1 WHERE id = ?", (jug['id'],), commit=True)
+                            st.rerun()
+                        
+                        if st.checkbox("Vender", key=f"vchk_{jug['id']}"):
+                            if st.button("VENDER 💰", key=f"vbtn_{jug['id']}"):
+                                pago = jug['Valor'] * 0.99
+                                ejecutar_db("DELETE FROM cartera WHERE id = ?", (jug['id'],), commit=True)
+                                ejecutar_db("UPDATE usuarios SET presupuesto = presupuesto + ? WHERE id = ?", (pago, u_id), commit=True)
+                                st.rerun()
+    else:
+        st.write("Banco vacío.")
 else:
-    st.warning("Tu cartera está vacía. Usa el Scouting para obtener jugadores.")
+    st.warning("No tienes jugadores en tu agencia.")
